@@ -1,61 +1,255 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// World constants, districts, vehicle fleet, weapon arsenal, wanted tiers and radio stations
+// for Solaria Bay: Sun & Syndicate.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
 export const STEP = 1 / 60;
+export const SAVE_STORAGE_KEY = 'solaria_bay_save_v1';
 
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+export const WORLD_CONFIG = {
+  gridCols: 8,
+  gridRows: 8,
+  blockPitch: 240,
+  roadWidth: 56,
+  sidewalkWidth: 12,
+  worldMinX: -960,
+  worldMaxX: 960,
+  worldMinY: -960,
+  worldMaxY: 960,
+  oceanStartX: 660,
+  beachStartX: 540,
+  marinaMinY: -360,
+  marinaMaxY: 360,
+  defaultTimeOfDay: 18.45, // Golden hour sunset
 };
 
-export const LIVES = 3;
+export const CITY_DISTRICTS = [
+  {
+    id: 'coral_promenade',
+    name: 'Coral Promenade',
+    subtitle: 'Art-Deco Beachfront & Ocean Drive',
+    minX: 240, maxX: 960, minY: -480, maxY: 480,
+    themeColor: '#ff5e8e',
+    accentColor: '#25f4ee',
+    heightMin: 42, heightMax: 115,
+  },
+  {
+    id: 'solaria_downtown',
+    name: 'Solaria Downtown',
+    subtitle: 'Financial Glass Towers & Skybridges',
+    minX: -240, maxX: 240, minY: -240, maxY: 240,
+    themeColor: '#38bdf8',
+    accentColor: '#facc15',
+    heightMin: 95, heightMax: 220,
+  },
+  {
+    id: 'mirage_strip',
+    name: 'Mirage Neon Strip',
+    subtitle: 'Casinos, Nightclubs & Rooftop Lounges',
+    minX: -240, maxX: 240, minY: -960, maxY: -240,
+    themeColor: '#c084fc',
+    accentColor: '#fb7185',
+    heightMin: 68, heightMax: 155,
+  },
+  {
+    id: 'starlight_marina',
+    name: 'Starlight Marina',
+    subtitle: 'Yacht Basin, Pier & Bay Bridge',
+    minX: 240, maxX: 960, minY: 480, maxY: 960,
+    themeColor: '#2dd4bf',
+    accentColor: '#fde047',
+    heightMin: 35, heightMax: 85,
+  },
+  {
+    id: 'palma_vista',
+    name: 'Palma Vista Hills',
+    subtitle: 'Villas, Boutiques & Palm Boulevards',
+    minX: -960, maxX: -240, minY: -960, maxY: 0,
+    themeColor: '#fb923c',
+    accentColor: '#34d399',
+    heightMin: 30, heightMax: 78,
+  },
+  {
+    id: 'cobre_docks',
+    name: 'Cobre Harbor Docks',
+    subtitle: 'Freight Terminals & Syndicate Depots',
+    minX: -960, maxX: 240, minY: 240, maxY: 960,
+    themeColor: '#f59e0b',
+    accentColor: '#60a5fa',
+    heightMin: 36, heightMax: 90,
+  },
+];
 
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const VEHICLE_CATALOG = {
+  mako_gtr: {
+    id: 'mako_gtr',
+    name: 'Mako GTR',
+    category: 'Exotic Coupe',
+    length: 44, width: 21, height: 13,
+    maxSpeed: 340, accel: 260, brake: 340, turnRate: 2.85, driftGrip: 0.92,
+    maxHealth: 240, value: 8500,
+    colors: ['#00f0ff', '#ff3b77', '#ffb800', '#a855f7'],
+    stripeColor: '#0b1020',
+  },
+  solaria_roadster: {
+    id: 'solaria_roadster',
+    name: 'Solaria V8 Roadster',
+    category: 'Open Convertible',
+    length: 43, width: 20, height: 12,
+    maxSpeed: 315, accel: 235, brake: 310, turnRate: 2.95, driftGrip: 0.9,
+    maxHealth: 200, value: 6500,
+    colors: ['#ff5e97', '#fef08a', '#38bdf8', '#f97316'],
+    convertible: true,
+  },
+  tormenta_sabre: {
+    id: 'tormenta_sabre',
+    name: 'Tormenta Sabre',
+    category: 'Supercharged Muscle',
+    length: 46, width: 21, height: 14,
+    maxSpeed: 300, accel: 245, brake: 290, turnRate: 2.6, driftGrip: 0.86,
+    maxHealth: 270, value: 5200,
+    colors: ['#ef4444', '#f59e0b', '#10b981', '#e2e8f0'],
+    stripeColor: '#111827',
+  },
+  palma_cruiser: {
+    id: 'palma_cruiser',
+    name: 'Palma Cruiser',
+    category: 'Coastal Sedan',
+    length: 43, width: 20, height: 14,
+    maxSpeed: 235, accel: 165, brake: 260, turnRate: 2.45, driftGrip: 0.95,
+    maxHealth: 220, value: 2400,
+    colors: ['#60a5fa', '#34d399', '#cbd5e1', '#fbbf24', '#f472b6'],
+  },
+  brutus_suv: {
+    id: 'brutus_suv',
+    name: 'Brutus 4x4',
+    category: 'Luxury SUV',
+    length: 47, width: 23, height: 18,
+    maxSpeed: 245, accel: 180, brake: 275, turnRate: 2.3, driftGrip: 0.94,
+    maxHealth: 340, value: 4100,
+    colors: ['#1e293b', '#d97706', '#475569', '#dc2626'],
+  },
+  boveda_van: {
+    id: 'boveda_van',
+    name: 'Boveda Bullion Van',
+    category: 'Armored Transport',
+    length: 52, width: 24, height: 22,
+    maxSpeed: 210, accel: 145, brake: 250, turnRate: 2.0, driftGrip: 0.96,
+    maxHealth: 520, value: 12000,
+    colors: ['#334155'],
+    stripeColor: '#eab308',
+  },
+  sbpd_interceptor: {
+    id: 'sbpd_interceptor',
+    name: 'SBPD Interceptor',
+    category: 'Police Pursuit',
+    length: 45, width: 21, height: 14,
+    maxSpeed: 310, accel: 245, brake: 320, turnRate: 2.8, driftGrip: 0.93,
+    maxHealth: 300, value: 4500,
+    colors: ['#0f172a'],
+    isPolice: true,
+  },
+  sword_tactical: {
+    id: 'sword_tactical',
+    name: 'SWORD Tactical Enforcer',
+    category: 'Heavy Police Unit',
+    length: 50, width: 24, height: 21,
+    maxSpeed: 265, accel: 210, brake: 300, turnRate: 2.35, driftGrip: 0.95,
+    maxHealth: 480, value: 7000,
+    colors: ['#172554'],
+    isPolice: true,
+  },
+  corsair_jetboat: {
+    id: 'corsair_jetboat',
+    name: 'Corsair Jetboat',
+    category: 'Marina Speedboat',
+    length: 48, width: 20, height: 12,
+    maxSpeed: 290, accel: 220, brake: 200, turnRate: 2.5, driftGrip: 0.89,
+    maxHealth: 260, value: 9000,
+    colors: ['#f8fafc', '#06b6d4'],
+    isBoat: true,
+  },
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
-};
+export const WEAPON_CATALOG = [
+  {
+    id: 'fists',
+    name: 'Street Brawl',
+    shortName: 'FISTS',
+    damage: 25,
+    fireInterval: 0.4,
+    range: 34,
+    speed: 0,
+    spread: 0,
+    pellets: 1,
+    color: '#f8fafc',
+    infinite: true,
+  },
+  {
+    id: 'viper_pistol',
+    name: 'Viper 9mm Pistol',
+    shortName: 'VIPER 9MM',
+    damage: 34,
+    fireInterval: 0.22,
+    range: 460,
+    speed: 780,
+    spread: 0.03,
+    pellets: 1,
+    color: '#fde047',
+    defaultAmmo: 140,
+  },
+  {
+    id: 'stinger_smg',
+    name: 'Stinger Micro-SMG',
+    shortName: 'STINGER SMG',
+    damage: 24,
+    fireInterval: 0.095,
+    range: 440,
+    speed: 820,
+    spread: 0.075,
+    pellets: 1,
+    color: '#38bdf8',
+    defaultAmmo: 320,
+  },
+  {
+    id: 'tactical_shotgun',
+    name: 'Solaria Combat Shotgun',
+    shortName: 'SHOTGUN',
+    damage: 22,
+    fireInterval: 0.58,
+    range: 280,
+    speed: 720,
+    spread: 0.19,
+    pellets: 6,
+    color: '#fb923c',
+    defaultAmmo: 64,
+  },
+  {
+    id: 'helios_rifle',
+    name: 'Helios Heavy Carbine',
+    shortName: 'HELIOS AR',
+    damage: 45,
+    fireInterval: 0.13,
+    range: 560,
+    speed: 920,
+    spread: 0.025,
+    pellets: 1,
+    color: '#f43f5e',
+    defaultAmmo: 240,
+  },
+];
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+export const WANTED_TIERS = [
+  { stars: 0, label: 'CLEAR', maxUnits: 0, chopper: false, sword: false, cooldownSec: 0 },
+  { stars: 1, label: 'PATROL ALERT', maxUnits: 2, chopper: false, sword: false, cooldownSec: 14 },
+  { stars: 2, label: 'ACTIVE PURSUIT', maxUnits: 3, chopper: false, sword: false, cooldownSec: 20 },
+  { stars: 3, label: 'INTERCEPTOR RESPONSE', maxUnits: 5, chopper: true, sword: false, cooldownSec: 26 },
+  { stars: 4, label: 'AIR & TACTICAL LOCKDOWN', maxUnits: 6, chopper: true, sword: true, cooldownSec: 34 },
+  { stars: 5, label: 'MAX SWORD MANHUNT', maxUnits: 8, chopper: true, sword: true, cooldownSec: 45 },
+];
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
-
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
-};
-
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const RADIO_STATIONS = [
+  { id: 'sol_marina', name: 'SOL MARINA 104.5 FM', genre: 'Sunset Synthwave', track: 'Neon Tide Over Coral Drive', bpm: 118, baseFreq: 110 },
+  { id: 'caliente_fm', name: 'CALIENTE 98.1 FM', genre: 'Tropical Bass & Club', track: 'Fuego en la Bahia', bpm: 126, baseFreq: 98 },
+  { id: 'neon_drift', name: 'NEON DRIFT 88.9 FM', genre: 'Midnight Outrun', track: 'Turbo Mirage 1989', bpm: 132, baseFreq: 130.8 },
+  { id: 'cobre_rock', name: 'COBRE ROCK 107.3 FM', genre: 'Coastal Garage Rock', track: 'Saltwater Asphalt', bpm: 140, baseFreq: 82.4 },
+  { id: 'radio_off', name: 'RADIO OFF', genre: 'Engine & City Ambience', track: 'Direct Exhaust', bpm: 0, baseFreq: 0 },
+];

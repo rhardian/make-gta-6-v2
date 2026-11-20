@@ -1,53 +1,107 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard and mouse controller for Solaria Bay: Sun & Syndicate.
+// Supports WASD/Arrows driving and walking, mouse 3D ground raycast aiming, carjacking (F/Enter),
+// handbrake/shoot (Space), nitro/sprint (Shift), weapon selection (Q/E/1-5), camera toggle (V),
+// radio tuning (R), landmark service interaction (N), map/save tablet (M/Esc) and quick-save (F5/F9).
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+import { screenRayToGround } from './camera-3d.js';
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+export function createInputController(canvas) {
+  const keysDown = new Set();
+  const triggers = new Set();
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  let mouseX = 640;
+  let mouseY = 360;
+  let mouseDown = false;
+  let mouseMovedRecently = 0;
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+  window.addEventListener('keydown', (e) => {
+    const code = e.code;
+    if (!keysDown.has(code)) {
+      triggers.add(code);
+    }
+    keysDown.add(code);
+
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'F5', 'F9'].includes(code)) {
+      e.preventDefault();
+    }
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+
+  window.addEventListener('keyup', (e) => {
+    keysDown.delete(e.code);
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
+
   window.addEventListener('blur', () => {
-    left = false;
-    right = false;
+    keysDown.clear();
+    mouseDown = false;
   });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      mouseX = ((e.clientX - rect.left) / rect.width) * canvas.width;
+      mouseY = ((e.clientY - rect.top) / rect.height) * canvas.height;
+      mouseMovedRecently = 3.5;
+    }
   });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) {
+      mouseDown = true;
+      triggers.add('MouseLeft');
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) {
+      mouseDown = false;
+    }
+  });
+
+  function pollInputState(camera, dt) {
+    mouseMovedRecently = Math.max(0, mouseMovedRecently - dt);
+
+    const up = keysDown.has('KeyW') || keysDown.has('ArrowUp');
+    const down = keysDown.has('KeyS') || keysDown.has('ArrowDown');
+    const left = keysDown.has('KeyA') || keysDown.has('ArrowLeft');
+    const right = keysDown.has('KeyD') || keysDown.has('ArrowRight');
+    const shift = keysDown.has('ShiftLeft') || keysDown.has('ShiftRight');
+    const space = keysDown.has('Space');
+
+    const throttle = (up ? 1 : 0) - (down ? 1 : 0);
+    const steer = (right ? 1 : 0) - (left ? 1 : 0);
+
+    const aimWorldPoint = camera ? screenRayToGround(camera, mouseX, mouseY) : null;
+
+    return {
+      throttle,
+      steer,
+      handbrake: space,
+      nitro: shift,
+      moveForward: throttle,
+      moveRight: 0,
+      turnInput: steer,
+      sprint: shift,
+      firing: mouseDown || space,
+      mouseAimActive: mouseDown || mouseMovedRecently > 0,
+      aimWorldPoint,
+    };
+  }
+
+  function consumeTrigger(code) {
+    if (triggers.has(code)) {
+      triggers.delete(code);
+      return true;
+    }
+    return false;
+  }
+
+  function clearTriggers() {
+    triggers.clear();
+  }
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
+    pollInputState,
+    consumeTrigger,
+    clearTriggers,
   };
 }
