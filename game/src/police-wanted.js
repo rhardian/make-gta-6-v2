@@ -26,6 +26,7 @@ export function createWantedSystem() {
     dispatchBannerTimer: 0,
     spawnCooldown: 0,
     bustedTimer: 0,
+    roadblocks: [],
     helicopter: {
       active: false,
       x: 300,
@@ -103,9 +104,24 @@ export function clearWantedLevel(wanted, player) {
   wanted.evasionTimer = 0;
   wanted.evading = false;
   wanted.bustedTimer = 0;
+  wanted.roadblocks = [];
   wanted.helicopter.active = false;
   wanted.dispatchMessage = 'SBPD PURSUIT EVADED';
   wanted.dispatchBannerTimer = 3.2;
+}
+
+export function spawnPoliceRoadblock(wanted, x, y, angle = 0, spikeWidth = 38) {
+  const rb = {
+    x,
+    y,
+    angle,
+    spikeWidth,
+    active: true,
+    triggered: false,
+  };
+  wanted.roadblocks.push(rb);
+  if (wanted.roadblocks.length > 4) wanted.roadblocks.shift();
+  return rb;
 }
 
 export function updatePolicePursuit(wanted, player, vehicles, pedestrians, cityMap, combatSystem, skidmarks, rng, dt) {
@@ -206,6 +222,22 @@ export function updatePolicePursuit(wanted, player, vehicles, pedestrians, cityM
         range: 340,
         color: '#fde047',
       });
+    }
+  }
+
+  // Check spike strip roadblock contact
+  if (player.inVehicle && player.vehicle && !player.vehicle.isBoat) {
+    for (let i = 0; i < wanted.roadblocks.length; i += 1) {
+      const rb = wanted.roadblocks[i];
+      if (!rb.active || rb.triggered) continue;
+      if (Math.hypot(player.vehicle.x - rb.x, player.vehicle.y - rb.y) < rb.spikeWidth * 0.5) {
+        rb.triggered = true;
+        player.vehicle.speed *= 0.55;
+        player.vehicle.vx *= 0.55;
+        player.vehicle.vy *= 0.55;
+        player.vehicle.drifting = true;
+        combatSystem.spawnFloatingText(rb.x, rb.y, 18, 'SPIKE STRIP HIT!', '#ff2a5f');
+      }
     }
   }
 

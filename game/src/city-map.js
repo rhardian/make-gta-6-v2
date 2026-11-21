@@ -6,9 +6,9 @@ import { CITY_DISTRICTS, WORLD_CONFIG } from './config.js';
 import { createSeededRandom, hashCoords, randomChoice, randomRange } from './random.js';
 
 const BUILDING_SIGNS = [
-  'HOTEL SOLARIA', 'CORAL PALMS', 'MIRAGE CASINO', 'CLUB ECLIPSE',
-  'VANCE TOWER', 'STARLIGHT YACHTS', 'AZURE RESORT', 'PALMA PLAZA',
-  'BANCO SOLARIA', 'NEON LAGOON', 'COBRE FREIGHT', 'HELIO SKYBAR',
+  'HOTEL SOLARIA', 'MIRAGE CASINO', 'CORAL BANK', 'SOLARIA CUSTOMS',
+  'VANCE TOWER', 'CLUB ECLIPSE', 'STARLIGHT PIER', 'PALMA PLAZA',
+  'BANCO SOLARIA', 'NEON LAGOON', 'AZURE RESORT', 'HELIO SKYBAR',
 ];
 
 const FACADE_PALETTES = {
@@ -97,10 +97,11 @@ export function createCityMap(seed = 101) {
           const height = Math.round(randomRange(rng, district.heightMin, district.heightMax));
           const palette = randomChoice(rng, palettes);
           const hasSetback = height > 80 || rng() > 0.35;
-          const hasHelipad = height > 125 && rng() > 0.45;
+          const hasHelipad = height > 105 && (gx === 0 || gx === -1 || rng() > 0.42);
           const hasPool = !hasHelipad && district.id === 'coral_promenade' && rng() > 0.4;
-          const signText = (height > 65 && rng() > 0.38)
-            ? BUILDING_SIGNS[(buildingId + Math.floor(hashCoords(gx, gy) * 20)) % BUILDING_SIGNS.length]
+          const isPrimeAvenue = gx === 1 || gx === 0 || gx === -1;
+          const signText = (isPrimeAvenue || (height > 58 && rng() > 0.32))
+            ? BUILDING_SIGNS[(buildingId + Math.floor(hashCoords(gx, gy) * 16)) % BUILDING_SIGNS.length]
             : null;
 
           buildings.push({
@@ -116,12 +117,13 @@ export function createCityMap(seed = 101) {
             roofColor: palette.roof,
             trimColor: palette.trim,
             windowColor: palette.window,
-            floors: Math.max(3, Math.floor(height / 13)),
-            windowCols: Math.max(3, Math.floor(bw / 14)),
-            windowRows: Math.max(3, Math.floor(bd / 14)),
+            floors: Math.max(4, Math.floor(height / 12)),
+            windowCols: Math.max(4, Math.floor(bw / 11)),
+            windowRows: Math.max(4, Math.floor(bd / 11)),
             hasSetback,
             hasHelipad,
             hasPool,
+            hasAcUnits: true,
             signText,
           });
         }
@@ -129,10 +131,12 @@ export function createCityMap(seed = 101) {
 
       // Sidewalk palm trees & street lamps around block perimeter
       const corners = [
-        [blockMinX - 6, blockMinY - 6],
-        [blockMinX + innerSpan + 6, blockMinY - 6],
-        [blockMinX - 6, blockMinY + innerSpan + 6],
-        [blockMinX + innerSpan + 6, blockMinY + innerSpan + 6],
+        [blockMinX - 5, blockMinY - 5],
+        [blockMinX + innerSpan + 5, blockMinY - 5],
+        [blockMinX - 5, blockMinY + innerSpan + 5],
+        [blockMinX + innerSpan + 5, blockMinY + innerSpan + 5],
+        [blockMinX - 5, centerY],
+        [blockMinX + innerSpan + 5, centerY],
       ];
       for (let c = 0; c < corners.length; c += 1) {
         streetLamps.push({ x: corners[c][0], y: corners[c][1], height: 24 });
@@ -144,7 +148,33 @@ export function createCityMap(seed = 101) {
     }
   }
 
-  // Iconic Ocean Palm Boulevard palm colonnade & colorful beach umbrellas
+  // Ensure deterministic signature neon signs on key avenues for Ocean Palm Drive & Downtown
+  const signatureAssignments = [
+    { targetX: 410, targetY: -80, sign: 'HOTEL SOLARIA' },
+    { targetX: 410, targetY: -180, sign: 'MIRAGE CASINO' },
+    { targetX: 410, targetY: 60, sign: 'SOLARIA CUSTOMS' },
+    { targetX: 410, targetY: -20, sign: 'CORAL BANK' },
+    { targetX: -65, targetY: -50, sign: 'CORAL BANK' },
+    { targetX: 65, targetY: -50, sign: 'VANCE TOWER' },
+    { targetX: -65, targetY: 45, sign: 'SOLARIA CUSTOMS' },
+    { targetX: 65, targetY: 45, sign: 'MIRAGE CASINO' },
+    { targetX: 410, targetY: 165, sign: 'STARLIGHT PIER' },
+  ];
+  for (let s = 0; s < signatureAssignments.length; s += 1) {
+    const item = signatureAssignments[s];
+    let bestB = null;
+    let bestD = Infinity;
+    for (let i = 0; i < buildings.length; i += 1) {
+      const d = Math.hypot(buildings[i].x - item.targetX, buildings[i].y - item.targetY);
+      if (d < bestD) {
+        bestD = d;
+        bestB = buildings[i];
+      }
+    }
+    if (bestB) bestB.signText = item.sign;
+  }
+
+  // Iconic Ocean Palm Boulevard palm colonnade, streetlamps & colorful 3D beach umbrellas
   for (let py = -780; py <= 780; py += 58) {
     palmTrees.push({
       x: beachStartX - 18,
@@ -153,22 +183,40 @@ export function createCityMap(seed = 101) {
       lean: 0.18,
       seed: (py + 900) * 0.013,
     });
+    streetLamps.push({ x: beachStartX - 24, y: py + 28, height: 24 });
+    beachProps.push({
+      x: beachStartX + 42 + ((Math.abs(py) * 5) % 44),
+      y: py - 12,
+      radius: 13.5,
+      color: ['#ff2a78', '#00f5d4', '#facc15', '#fb923c', '#a855f7', '#38bdf8'][Math.abs(py) % 6],
+      secondaryColor: '#f8fafc',
+    });
     if (py % 116 === 0) {
       palmTrees.push({
-        x: beachStartX + 26,
+        x: beachStartX + 24,
         y: py + 24,
         height: 33,
         lean: 0.28,
         seed: (py + 500) * 0.021,
       });
       beachProps.push({
-        x: beachStartX + 68 + ((Math.abs(py) * 7) % 30),
-        y: py,
-        radius: 13,
-        color: randomChoice(rng, ['#ff477e', '#00f5d4', '#fee440', '#ff9f1c', '#a855f7']),
+        x: beachStartX + 76 + ((Math.abs(py) * 7) % 24),
+        y: py + 18,
+        radius: 12.5,
+        color: ['#00f5d4', '#ff2a78', '#facc15', '#a855f7'][(Math.abs(py) / 116) % 4 | 0],
+        secondaryColor: '#fef08a',
       });
     }
   }
+
+  const ferrisWheel = {
+    x: oceanStartX + 115,
+    y: 60,
+    zBase: 3.4,
+    centerZ: 42,
+    radius: 31,
+    cabins: 10,
+  };
 
   const landmarks = [
     {
@@ -176,7 +224,7 @@ export function createCityMap(seed = 101) {
       kind: 'safehouse',
       name: 'Valeria\'s Oceanfront Penthouse',
       x: 440,
-      y: -40,
+      y: -115,
       color: '#25f4ee',
       description: 'Save Progress & Replenish Armor',
     },
@@ -217,6 +265,7 @@ export function createCityMap(seed = 101) {
     streetLamps,
     beachProps,
     piers,
+    ferrisWheel,
     landmarks,
   };
 }

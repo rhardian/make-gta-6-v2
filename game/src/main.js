@@ -3,36 +3,7 @@
 // pedestrians, 5-star SBPD & helicopter pursuit system, 5-act story campaign, combat,
 // procedural Web Audio radio stations, persistent save slots and screenshot staging.
 
-import { STEP } from './config.js';
-import { createSoundEngine } from './audio.js';
-import { createCamera3D, cycleCameraMode, updateCameraFollow } from './camera-3d.js';
-import { createCityMap, getDistrictAt } from './city-map.js';
-import { createCombatAndEffects } from './combat-effects.js';
-import { createInputController } from './input.js';
-import { createMissionDirector, startStoryMission, updateActiveMission } from './missions.js';
-import {
-  attemptEnterOrHijackVehicle,
-  createPlayerState,
-  cyclePlayerWeapon,
-  selectPlayerWeapon,
-  updatePlayerOnFoot,
-} from './player.js';
-import {
-  clearWantedLevel,
-  createWantedSystem,
-  reportPlayerCrime,
-  updatePolicePursuit,
-} from './police-wanted.js';
-import { createSeededRandom } from './random.js';
-import { createSaveManager } from './save-storage.js';
-import {
-  alertNearbyPedestrians,
-  createTrafficAndPedestrians,
-  updatePedestrianAI,
-  updateTrafficVehicles,
-} from './traffic-peds.js';
-import { resolveVehicleCollisions, updateVehiclePhysics } from './vehicles.js';
-import { stageGameplayShot } from './shots.js';
+import { createWorldRenderer } from './render-world.js';
 import {
   SCREEN_BUSTED,
   SCREEN_MAP_SAVE,
@@ -41,7 +12,40 @@ import {
   SCREEN_WASTED,
   createHudRenderer,
 } from './render-hud.js';
-import { createWorldRenderer } from './render-world.js';
+import { createCityMap, getDistrictAt } from './city-map.js';
+import {
+  customizeVehicleAtGarage,
+  resolveVehicleCollisions,
+  updateVehiclePhysics,
+} from './vehicles.js';
+import {
+  alertNearbyPedestrians,
+  createTrafficAndPedestrians,
+  updatePedestrianAI,
+  updateTrafficVehicles,
+} from './traffic-peds.js';
+import {
+  clearWantedLevel,
+  createWantedSystem,
+  reportPlayerCrime,
+  updatePolicePursuit,
+} from './police-wanted.js';
+import { createMissionDirector, startStoryMission, updateActiveMission } from './missions.js';
+import {
+  attemptEnterOrHijackVehicle,
+  createPlayerState,
+  cyclePlayerWeapon,
+  selectPlayerWeapon,
+  updatePlayerOnFoot,
+} from './player.js';
+import { createCombatAndEffects } from './combat-effects.js';
+import { stageGameplayShot } from './shots.js';
+import { createCamera3D, cycleCameraMode, updateCameraFollow } from './camera-3d.js';
+import { STEP } from './config.js';
+import { createInputController } from './input.js';
+import { createSaveManager } from './save-storage.js';
+import { createSoundEngine } from './audio.js';
+import { createSeededRandom } from './random.js';
 
 const MAX_FRAME_DELTA = 0.25;
 
@@ -58,7 +62,7 @@ function announceStatus(message) {
   if (statusEl) statusEl.textContent = message;
 }
 
-function createSolariaWorld(seed) {
+export function createSolariaWorld(seed) {
   const rng = createSeededRandom(seed);
   const cityMap = createCityMap(seed);
   const camera = createCamera3D();
@@ -97,7 +101,7 @@ const worldRenderer = createWorldRenderer();
 const hudRenderer = createHudRenderer();
 const saveManager = createSaveManager();
 
-function stepSimulationFrame(dt, controls) {
+export function stepSimulationFrame(dt, controls) {
   worldState.simTime += dt;
   const {
     rng,
@@ -165,7 +169,7 @@ function stepSimulationFrame(dt, controls) {
   return null;
 }
 
-function handleLandmarkInteraction() {
+export function handleLandmarkInteraction() {
   const { player, wanted, combat, audio } = worldState;
   const lm = player.nearbyLandmark;
   if (!lm) return;
@@ -181,14 +185,14 @@ function handleLandmarkInteraction() {
     if (player.cash >= 1000) {
       player.cash -= 1000;
       if (player.vehicle) {
-        player.vehicle.health = player.vehicle.maxHealth;
         const palette = ['#00f0ff', '#ff3b77', '#fde047', '#a855f7', '#34d399'];
-        player.vehicle.color = palette[Math.floor(worldState.rng() * palette.length)];
+        const chosenColor = palette[Math.floor(worldState.rng() * palette.length)];
+        customizeVehicleAtGarage(player.vehicle, chosenColor, '#25f4ee');
       }
       clearWantedLevel(wanted, player);
-      combat.spawnFloatingText(player.x, player.y, 24, 'RESPRAYED & WANTED CLEARED!', '#c084fc');
+      combat.spawnFloatingText(player.x, player.y, 24, 'STAGE 3 TUNED & WANTED CLEARED!', '#c084fc');
       audio.playSoundEffect('cash');
-      announceStatus('Vehicle resprayed and Wanted level cleared.');
+      announceStatus('Vehicle tuned, resprayed and Wanted level cleared.');
     }
   } else if (lm.kind === 'armory') {
     if (player.cash >= 500) {
@@ -204,7 +208,7 @@ function handleLandmarkInteraction() {
   }
 }
 
-function respawnPlayerAfterIncident(incidentScreen) {
+export function respawnPlayerAfterIncident(incidentScreen) {
   const { player, wanted } = worldState;
   if (player.inVehicle) {
     player.inVehicle = false;
@@ -229,7 +233,7 @@ function resizeCanvasToViewport() {
   }
 }
 
-function runDeterministicShotMode(shotName) {
+export function runDeterministicShotMode(shotName) {
   canvas.width = 1280;
   canvas.height = 720;
   const staged = stageGameplayShot(shotName, worldState, stepSimulationFrame, saveManager);
@@ -248,7 +252,7 @@ function runDeterministicShotMode(shotName) {
       if (downloadName) {
         const link = document.createElement('a');
         link.download = downloadName;
-        link.href = canvas.toDataURL('image/jpeg', 0.90);
+        link.href = canvas.toDataURL('image/jpeg', 0.88);
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -258,7 +262,7 @@ function runDeterministicShotMode(shotName) {
   requestAnimationFrame(paintShotFrame);
 }
 
-function startSolariaGame() {
+export function startSolariaGame() {
   resizeCanvasToViewport();
   window.addEventListener('resize', resizeCanvasToViewport);
 

@@ -26,31 +26,36 @@ const PED_OUTFITS = [
 
 let nextPedUid = 1;
 
-export function createPedestrian(x, y, rng, role = 'civilian') {
+export function createPedestrian(x, y, rng, role = 'civilian', overrides = {}) {
   const outfit = randomChoice(rng, PED_OUTFITS) || PED_OUTFITS[0];
   const isPolice = role === 'police';
   const isSyndicate = role === 'syndicate';
+  const isPartner = role === 'partner';
 
   return {
     id: `ped_${nextPedUid++}`,
-    role, // 'civilian' | 'police' | 'syndicate' | 'vip'
+    role, // 'civilian' | 'police' | 'syndicate' | 'partner'
+    name: overrides.name || (isPartner ? 'Rico Vega' : null),
     x,
     y,
     z: 0,
     vx: 0,
     vy: 0,
-    angle: randomRange(rng, -Math.PI, Math.PI),
+    angle: overrides.angle ?? randomRange(rng, -Math.PI, Math.PI),
+    aimAngle: overrides.aimAngle ?? overrides.angle ?? 0,
     walkCycle: randomRange(rng, 0, Math.PI * 2),
-    health: isSyndicate ? 90 : isPolice ? 100 : 50,
-    maxHealth: isSyndicate ? 90 : isPolice ? 100 : 50,
+    health: isPartner ? 200 : isSyndicate ? 90 : isPolice ? 100 : 50,
+    maxHealth: isPartner ? 200 : isSyndicate ? 90 : isPolice ? 100 : 50,
     alive: true,
-    panicTimer: 0,
+    panicTimer: overrides.panicTimer ?? 0,
     fireCooldown: randomRange(rng, 0.2, 1.0),
+    muzzleFlashTimer: overrides.muzzleFlashTimer ?? 0,
+    hasWeapon: Boolean(overrides.hasWeapon ?? (isPolice || isSyndicate || isPartner)),
     cashValue: isSyndicate ? 450 : Math.round(randomRange(rng, 40, 160)),
-    shirtColor: isPolice ? '#1e3a8a' : isSyndicate ? '#dc2626' : outfit.shirt,
-    pantsColor: isPolice ? '#0f172a' : isSyndicate ? '#111827' : outfit.pants,
-    skinColor: outfit.skin,
-    hairColor: outfit.hair,
+    shirtColor: overrides.shirtColor || (isPolice ? '#1e3a8a' : isSyndicate ? '#dc2626' : isPartner ? '#f59e0b' : outfit.shirt),
+    pantsColor: overrides.pantsColor || (isPolice ? '#0f172a' : isSyndicate ? '#111827' : isPartner ? '#1e293b' : outfit.pants),
+    skinColor: overrides.skinColor || outfit.skin,
+    hairColor: overrides.hairColor || outfit.hair,
     targetDirTimer: randomRange(rng, 2.5, 6.0),
   };
 }
@@ -120,14 +125,19 @@ export function createTrafficAndPedestrians(cityMap, rng) {
     }
   }
 
-  // Sidewalk pedestrians across districts and along Ocean Palm Promenade
-  for (let i = 0; i < 48; i += 1) {
+  // Sidewalk pedestrians across districts, Ocean Palm Promenade, Beach & Marina Pier
+  for (let i = 0; i < 56; i += 1) {
     const rx = randomChoice(rng, cityMap.roadsX);
     const side = rng() > 0.5 ? 34 : -34;
     const py = randomRange(rng, -680, 680);
     const ped = createPedestrian(rx + side, py, rng, 'civilian');
     ped.angle = rng() > 0.5 ? Math.PI * 0.5 : -Math.PI * 0.5;
     pedestrians.push(ped);
+  }
+  for (let by = -320; by <= 320; by += 55) {
+    const beachPed = createPedestrian(WORLD_CONFIG.beachStartX + 18 + (Math.abs(by) % 45), by, rng, 'civilian');
+    beachPed.angle = by % 2 === 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
+    pedestrians.push(beachPed);
   }
 
   return {
@@ -224,6 +234,12 @@ export function updatePedestrianAI(pedestrians, cashDrops, player, vehicles, cit
 
     p.targetDirTimer -= dt;
     p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+    p.muzzleFlashTimer = Math.max(0, (p.muzzleFlashTimer || 0) - dt);
+
+    if (p.role === 'partner') {
+      p.walkCycle = (p.walkCycle + dt * 3.5) % (Math.PI * 2);
+      continue;
+    }
 
     const distToPlayer = Math.hypot(player.x - p.x, player.y - p.y);
 
@@ -231,6 +247,7 @@ export function updatePedestrianAI(pedestrians, cashDrops, player, vehicles, cit
       // Hostile combatant AI: face player and fire bursts
       if (distToPlayer < 310) {
         p.angle = Math.atan2(player.y - p.y, player.x - p.x);
+        p.aimAngle = p.angle;
         if (distToPlayer > 95) {
           p.vx = Math.cos(p.angle) * 58;
           p.vy = Math.sin(p.angle) * 58;
@@ -241,6 +258,7 @@ export function updatePedestrianAI(pedestrians, cashDrops, player, vehicles, cit
         }
         if (p.fireCooldown <= 0 && distToPlayer < 260) {
           p.fireCooldown = p.role === 'syndicate' ? 0.85 : 0.95;
+          p.muzzleFlashTimer = 0.14;
           combatSystem.spawnProjectile({
             owner: p.role,
             x: p.x + Math.cos(p.angle) * 10,

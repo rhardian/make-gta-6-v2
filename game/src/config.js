@@ -88,6 +88,8 @@ export const VEHICLE_CATALOG = {
     maxHealth: 240, value: 8500,
     colors: ['#00f0ff', '#ff3b77', '#ffb800', '#a855f7'],
     stripeColor: '#0b1020',
+    underglowColor: '#25f4ee',
+    hasSpoiler: true,
   },
   solaria_roadster: {
     id: 'solaria_roadster',
@@ -98,6 +100,8 @@ export const VEHICLE_CATALOG = {
     maxHealth: 200, value: 6500,
     colors: ['#ff5e97', '#fef08a', '#38bdf8', '#f97316'],
     convertible: true,
+    underglowColor: '#ff2a78',
+    hasSpoiler: true,
   },
   tormenta_sabre: {
     id: 'tormenta_sabre',
@@ -108,6 +112,8 @@ export const VEHICLE_CATALOG = {
     maxHealth: 270, value: 5200,
     colors: ['#ef4444', '#f59e0b', '#10b981', '#e2e8f0'],
     stripeColor: '#111827',
+    underglowColor: '#f59e0b',
+    hasSpoiler: true,
   },
   palma_cruiser: {
     id: 'palma_cruiser',
@@ -164,8 +170,21 @@ export const VEHICLE_CATALOG = {
     length: 48, width: 20, height: 12,
     maxSpeed: 290, accel: 220, brake: 200, turnRate: 2.5, driftGrip: 0.89,
     maxHealth: 260, value: 9000,
-    colors: ['#f8fafc', '#06b6d4'],
+    colors: ['#25f4ee', '#f8fafc', '#06b6d4'],
+    stripeColor: '#ff2a78',
     isBoat: true,
+  },
+  sbpd_harbor_patrol: {
+    id: 'sbpd_harbor_patrol',
+    name: 'SBPD Harbor Interceptor',
+    category: 'Police Patrol Boat',
+    length: 48, width: 21, height: 13,
+    maxSpeed: 285, accel: 215, brake: 210, turnRate: 2.45, driftGrip: 0.91,
+    maxHealth: 300, value: 8500,
+    colors: ['#0f172a'],
+    stripeColor: '#f8fafc',
+    isBoat: true,
+    isPolice: true,
   },
 };
 

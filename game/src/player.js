@@ -29,6 +29,7 @@ export function createPlayerState() {
     cash: 12500,
     respect: 150,
     weaponIndex: 2, // Stinger Micro-SMG equipped by default
+    weaponWheelTimer: 0,
     ammo: ammoByWeapon,
     fireCooldown: 0,
     muzzleFlashTimer: 0,
@@ -55,12 +56,14 @@ export function getEquippedWeapon(player) {
 export function cyclePlayerWeapon(player, delta = 1) {
   const len = WEAPON_CATALOG.length;
   player.weaponIndex = (player.weaponIndex + delta + len) % len;
+  player.weaponWheelTimer = 2.2;
   return getEquippedWeapon(player);
 }
 
 export function selectPlayerWeapon(player, index) {
   if (index >= 0 && index < WEAPON_CATALOG.length) {
     player.weaponIndex = index;
+    player.weaponWheelTimer = 2.2;
   }
   return getEquippedWeapon(player);
 }
@@ -130,6 +133,7 @@ export function exitCurrentVehicle(player) {
 export function updatePlayerOnFoot(player, inputState, camera, cityMap, vehicles, dt) {
   player.fireCooldown = Math.max(0, player.fireCooldown - dt);
   player.muzzleFlashTimer = Math.max(0, player.muzzleFlashTimer - dt);
+  player.weaponWheelTimer = Math.max(0, (player.weaponWheelTimer || 0) - dt);
 
   if (player.inVehicle && player.vehicle) {
     if (player.vehicle.destroyed) {

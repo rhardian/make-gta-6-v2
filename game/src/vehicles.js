@@ -36,7 +36,12 @@ export function createVehicle(specId, x, y, angle = 0, rng = Math.random, overri
     maxHealth: spec.maxHealth,
     value: spec.value,
     color,
-    stripeColor: spec.stripeColor || null,
+    stripeColor: overrides.stripeColor ?? spec.stripeColor ?? null,
+    underglowColor: overrides.underglowColor ?? spec.underglowColor ?? null,
+    hasSpoiler: Boolean(overrides.hasSpoiler ?? spec.hasSpoiler),
+    customTier: overrides.customTier || 1,
+    wheelSpin: 0,
+    wakePhase: (nextVehicleUid * 1.1) % 6.28,
     convertible: Boolean(spec.convertible),
     isPolice: Boolean(spec.isPolice),
     isBoat: Boolean(spec.isBoat),
@@ -69,6 +74,7 @@ export function updateVehiclePhysics(vehicle, controls, cityMap, skidmarks, dt) 
   const nitro = Boolean(controls.nitro) && vehicle.nitroFuel > 5 && throttle > 0.1;
 
   vehicle.sirenPhase = (vehicle.sirenPhase + dt * 11) % (Math.PI * 2);
+  vehicle.wakePhase = (vehicle.wakePhase + dt * 7) % (Math.PI * 2);
   vehicle.steerAngle = steer * 0.55;
   vehicle.braking = throttle < -0.1 && vehicle.speed > 20;
   vehicle.nitroActive = nitro;
@@ -256,4 +262,16 @@ export function applyVehicleDamage(vehicle, amount) {
     return true;
   }
   return false;
+}
+
+export function customizeVehicleAtGarage(vehicle, paintColor, underglowColor = '#25f4ee') {
+  if (!vehicle) return null;
+  vehicle.color = paintColor || vehicle.color;
+  vehicle.underglowColor = underglowColor;
+  vehicle.hasSpoiler = true;
+  vehicle.customTier = Math.min(3, (vehicle.customTier || 1) + 1);
+  vehicle.maxHealth = Math.round(vehicle.maxHealth * 1.15);
+  vehicle.health = vehicle.maxHealth;
+  vehicle.nitroFuel = 100;
+  return vehicle;
 }
