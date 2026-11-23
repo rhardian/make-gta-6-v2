@@ -1,345 +1,54 @@
-// Sleek, high-contrast AAA HUD & rotated circular GPS Minimap renderer:
-// Mission progress, Live SBPD Tactical Dispatch, 5-star Wanted, Vitals, 8-slot Weapon Hotbar,
-// Crew Favours, Crew Comms with stylized SVG avatars, digital Speedometer & FM Radio card.
+// AAA HUD & rotated circular GPS Minimap renderer.
+import{RADIO_STATIONS,SERVICE_POIS,WEAPONS,WORLD}from'./config.js';
+import{CREW_ROSTER,getRespectRank}from'./crew-progression.js';
+import{getActiveMission,getActiveStage,STORY_MISSIONS}from'./missions-story.js';
+import{getDistrictAt,getStreetAt}from'./world-city.js';
 
-import { RADIO_STATIONS, SERVICE_POIS, WEAPONS, WORLD } from './config.js';
-import { CREW_ROSTER, getRespectRank } from './crew-progression.js';
-import { getActiveMission, getActiveStage, STORY_MISSIONS } from './missions-story.js';
-import { getDistrictAt, getStreetAt } from './world-city.js';
+const W_SVG={fists:'<rect x="7" y="4" width="14" height="7" rx="3"/>',viper_9mm:'<path d="M5 3h16v4H13l-2 5H7l1-5H5z"/>',stinger_smg:'<path d="M3 4h19v3h-5v5h-3V7H9l-1 4H5l1-4H3z"/>',coral_shotgun:'<path d="M2 5h23v2.5H13l-3 3.5H4l2-3.5H2z"/>',helios_carbine:'<path d="M2 5h7l2-2h7l1 2h7v2.5h-9l-1 4.5h-3l1-4.5H9l-3 3H2z"/>',mirage_sniper:'<path d="M1 6h8l2-3h6l1 3h9v2H16l-1 3h-3l1-3H8l-3 2.5H1z"/>',sol_grenade:'<circle cx="14" cy="8" r="4.5"/><rect x="12" y="1.5" width="4" height="2.5"/>',cobre_launcher:'<path d="M2 5h18l5 2-5 2H2z"/>'};
+const AV={'Rico Vega':['#0c2740','#0284c7','#111827','#d89d76','#22d3ee'],'Valeria "Val" Reyes':['#3b0c1e','#e11d48','#18100e','#dfa680','#fbbf24'],'Sora Chen':['#0f2d2a','#14b8a6','#1f2937','#f0c4a8','#5eead4'],'Dante Morales':['#22143d','#7c3aed','#18181b','#c68963','#c084fc'],'Elena Vance':['#340b18','#9f1239','#f59e0b','#ecc0a2','#fb7185'],'Capt. Alvarez':['#0f172a','#1e3a8a','#475569','#c98e6a','#38bdf8']};
+const av=s=>{const[b,j,h,k,a]=AV[s]||AV['Rico Vega'];return`<svg viewBox="0 0 44 44" width="44" height="44"><rect width="44" height="44" fill="${b}"/><circle cx="22" cy="18" r="10" fill="${h}"/><ellipse cx="22" cy="19" rx="8" ry="9" fill="${k}"/><rect x="15" y="16" width="14" height="3.2" rx="1.4" fill="#090d16"/><path d="M8 44c1-10 7-14 14-14s13 4 14 14z" fill="${j}"/><path d="M17 30l5 6 5-6" fill="none" stroke="${a}" stroke-width="2"/></svg>`;};
+const D=(c,h='')=>`<div class="${c}">${h}</div>`,S=(c,h)=>`<span class="${c}">${h}</span>`,I=(id,c,h='')=>`<div id="h${id}" class="${c}">${h}</div>`,R=Math.round;
+const clk=t=>`${String(Math.floor(((t%24)+24)%24)).padStart(2,'0')}:${String(Math.floor((t-Math.floor(t))*60)).padStart(2,'0')}`;
+const bar=(l,v,c,p)=>D('vi',D('vl',`<span>${l}</span><span>${v}</span>`)+D('bt',`<div class="bf ${c}" style="width:${p}%"></div>`));
 
-const WEAPON_SVGS = {
-  fists: '<svg class="w-ico" viewBox="0 0 28 14"><rect x="7" y="4" width="14" height="7" rx="3" fill="currentColor"/></svg>',
-  viper_9mm: '<svg class="w-ico" viewBox="0 0 28 14"><path d="M5 3h16v4H13l-2 5H7l1-5H5z" fill="currentColor"/></svg>',
-  stinger_smg: '<svg class="w-ico" viewBox="0 0 28 14"><path d="M3 4h19v3h-5v5h-3V7H9l-1 4H5l1-4H3z" fill="currentColor"/></svg>',
-  coral_shotgun: '<svg class="w-ico" viewBox="0 0 28 14"><path d="M2 5h23v2.5H13l-3 3.5H4l2-3.5H2z" fill="currentColor"/></svg>',
-  helios_carbine: '<svg class="w-ico" viewBox="0 0 28 14"><path d="M2 5h7l2-2h7l1 2h7v2.5h-9l-1 4.5h-3l1-4.5H9l-3 3H2z" fill="currentColor"/></svg>',
-  mirage_sniper: '<svg class="w-ico" viewBox="0 0 28 14"><path d="M1 6h8l2-3h6l1 3h9v2H16l-1 3h-3l1-3H8l-3 2.5H1z" fill="currentColor"/></svg>',
-  sol_grenade: '<svg class="w-ico" viewBox="0 0 28 14"><circle cx="14" cy="8" r="4.5" fill="currentColor"/><rect x="12" y="1.5" width="4" height="2.5" fill="currentColor"/></svg>',
-  cobre_launcher: '<svg class="w-ico" viewBox="0 0 28 14"><path d="M2 5h18l5 2-5 2H2z" fill="currentColor"/></svg>',
-};
+export function createHudManager(root){
+root.innerHTML=D('tl',I('m','gc mc')+I('d','gc dc hidden'))+D('tr',I('w','gc wc')+I('v','gc vc')+I('wp','gc wb')+I('f','fr'))+I('b','bn hidden')+I('x','xh hidden',D('xd'))+D('bl',D('rs','<canvas id="minimap-canvas" width="174" height="174"></canvas>')+I('l','gc lp'))+D('bc',I('p','ap hidden')+I('c','gc cc hidden'))+D('br',I('s','gc sc')+I('r','gc rc'));
+const q=s=>root.querySelector(s),el=Object.fromEntries(['m','d','w','v','wp','f','b','x','l','p','c','s','r'].map(k=>[k,q(`#h${k}`)])),mm=q('#minimap-canvas').getContext('2d');
 
-function makeAvatarSvg(speaker) {
-  const palettes = {
-    'Rico Vega': { bg: '#0c2740', jacket: '#0284c7', hair: '#111827', skin: '#d89d76', accent: '#22d3ee' },
-    'Valeria "Val" Reyes': { bg: '#3b0c1e', jacket: '#e11d48', hair: '#18100e', skin: '#dfa680', accent: '#fbbf24' },
-    'Sora Chen': { bg: '#0f2d2a', jacket: '#14b8a6', hair: '#1f2937', skin: '#f0c4a8', accent: '#5eead4' },
-    'Dante Morales': { bg: '#22143d', jacket: '#7c3aed', hair: '#18181b', skin: '#c68963', accent: '#c084fc' },
-    'Elena Vance': { bg: '#340b18', jacket: '#9f1239', hair: '#f59e0b', skin: '#ecc0a2', accent: '#fb7185' },
-    'Capt. Alvarez': { bg: '#0f172a', jacket: '#1e3a8a', hair: '#475569', skin: '#c98e6a', accent: '#38bdf8' },
-  };
-  const p = palettes[speaker] || palettes['Rico Vega'];
-  return `<svg viewBox="0 0 44 44" width="44" height="44">
-    <rect width="44" height="44" fill="${p.bg}"/>
-    <circle cx="22" cy="18" r="10" fill="${p.hair}"/>
-    <ellipse cx="22" cy="19" rx="8" ry="9" fill="${p.skin}"/>
-    <rect x="15" y="16" width="14" height="3.2" rx="1.4" fill="#090d16"/>
-    <path d="M8 44c1-10 7-14 14-14s13 4 14 14z" fill="${p.jacket}"/>
-    <path d="M17 30l5 6 5-6" fill="none" stroke="${p.accent}" stroke-width="2"/>
-  </svg>`;
+function radar(st){
+const{player:pl,vehicles:vh,missions:ms,cameraCtrl:cc}=st,c=87,yw=cc.yaw,P=(x,z)=>[-(x-pl.x)*.34,-(z-pl.z)*.34];
+const rc=(a,b,e,d,col)=>{const[x1,y1]=P(e,d),[x2,y2]=P(a,b);mm.fillStyle=col;mm.fillRect(x1,y1,x2-x1,y2-y1);};
+const dot=(x,y,r,col,sc)=>{mm.fillStyle=col;mm.beginPath();mm.arc(x,y,r,0,6.29);mm.fill();if(sc){mm.strokeStyle=sc;mm.lineWidth=1.5;mm.stroke();}};
+const ln=(a,b,e,d)=>{mm.beginPath();mm.moveTo(...P(a,b));mm.lineTo(...P(e,d));mm.stroke();};
+mm.clearRect(0,0,174,174);mm.save();mm.beginPath();mm.arc(c,c,85,0,6.29);mm.clip();mm.fillStyle='#0e668f';mm.fillRect(0,0,174,174);mm.translate(c,c);mm.rotate(yw);
+for(const a of[[-410,-410,268,410,'#1e293b'],[268,-410,322,410,'#f1cc82'],[520,-210,760,210,'#1f4a3c'],[258,-11,558,11,'#ef4444'],[266,111,418,129,'#c28550']])rc(...a);
+mm.strokeStyle='#64748b';mm.lineWidth=4;for(const ax of WORLD.avenuesX)ln(ax,-380,ax,380);for(const sz of WORLD.streetsZ)ln(-380,sz,254,sz);
+const sg=getActiveStage(ms),[tx,ty]=P(sg.x,sg.z);
+mm.strokeStyle='#fbbf24';mm.lineWidth=3;mm.setLineDash([5,3]);mm.beginPath();mm.moveTo(0,0);mm.lineTo(0,ty);mm.lineTo(tx,ty);mm.stroke();mm.setLineDash([]);
+for(const p of SERVICE_POIS)dot(...P(p.x,p.z),3.2,p.color);dot(tx,ty,5.2,'#fbbf24','#090d16');
+vh.forEach((v,i)=>{if(v.spec.isPolice&&!v.destroyed)dot(...P(v.x,v.z),v.spec.isHeli?4.6:3.5,v.spec.isHeli?'#22d3ee':i%2?'#3b82f6':'#ef4444');});
+mm.restore();mm.fillStyle='#fff';mm.beginPath();mm.moveTo(c,c-7);mm.lineTo(c+5.5,c+6);mm.lineTo(c,c+3);mm.lineTo(c-5.5,c+6);mm.closePath();mm.fill();
+const nx=c-Math.sin(yw)*74,ny=c+Math.cos(yw)*74;dot(nx,ny,8.5,'#090d16');
+mm.fillStyle='#fbbf24';mm.font='800 10px sans-serif';mm.textAlign='center';mm.textBaseline='middle';mm.fillText('N',nx,ny+.5);
 }
 
-function formatClock(timeOfDay) {
-  const h = Math.floor(((timeOfDay % 24) + 24) % 24);
-  const m = Math.floor((timeOfDay - Math.floor(timeOfDay)) * 60);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+function update(st){
+const{player:pl,missions:ms,wanted:wn,crew:cr,audio:au,timeOfDay:tod,elapsed:e}=st,ws=wn.state,inS=ws.inSight,stN=ws.stars,m=getActiveMission(ms),sg=getActiveStage(ms),u=wn.getActiveUnits(pl),blk=Math.floor(e*4)%2===0,tog=(k,ok)=>el[k].classList.toggle('hidden',!ok),sp=t=>`<span>${t}</span>`;
+el.m.innerHTML=D('mk',sp(`MISSION ${ms.missionIndex+1} OF ${STORY_MISSIONS.length}`)+sp(m.act))+D('mt',m.title)+D('sb',m.stages.map((_,i)=>D(`sg ${i<ms.stageIndex?'done':i===ms.stageIndex?'active':''}`)).join(''))+D('mo',sg.obj)+D('mn',`<strong>NEXT:</strong> ${sg.next}`);
+tog('d',stN>0&&u.length);if(stN>0&&u.length)el.d.innerHTML=D('dh',sp('<i class="dp"></i>SBPD TACTICAL DISPATCH')+sp(`${u.length} ACTIVE`))+D('dl',u.map(x=>D('dr',S('d1',x.callsign)+S('d2',`${x.dist}m`)+S(`db t-${x.badge}`,x.tactic))).join(''));
+el.w.innerHTML=D('wt',S('wl','SBPD WANTED')+D('sr',[1,2,3,4,5].map(s=>S(`si ${s<=stN?(inS&&blk?'alert':'lit'):''}`,'★')).join('')))+(stN>0?D('sw',S(`st ${inS?'hot':'cool'}`,ws.jamTimer>0?'JAMMED':inS?'IN SIGHT':'EVADING')+D('bt',`<div class="bf ${inS?'bH':'bC'}" style="width:${R(ws.sightMeter)}%"></div>`)):'');
+const rk=getRespectRank(pl.respect),hp=R(pl.health),ar=R(pl.armor);
+el.v.innerHTML=D('vh',D('cv',`$${R(pl.cash).toLocaleString()}`)+D('cr',D('ck',clk(tod))+D('rk',`RANK ${rk.rank} · ${rk.title.toUpperCase()}`)))+D('vb',bar('HEALTH',hp,'bHp',hp)+bar('ARMOUR',ar,'bAr',ar));
+el.wp.innerHTML=WEAPONS.map((w,i)=>`<div class="ws ${i===pl.weaponIndex?'active':''}" style="color:${i===pl.weaponIndex?'#fbbf24':'#cbd5e1'}">${S('wn',i+1)}<svg class="wi" fill="currentColor" viewBox="0 0 28 14">${W_SVG[w.id]||''}</svg>${S('wa',w.inf?'∞':pl.ammo[w.id]||0)}</div>`).join('');
+el.f.innerHTML=CREW_ROSTER.map(c=>{const cd=Math.ceil(cr.cooldowns[c.id]||0);return D(`fp ${cd<=0?'ready':'cooling'}`,D('fk',`[${c.key}]`)+D('fn',c.short)+D('fs',cd<=0?'READY':`${cd}s`));}).join('');
+el.l.innerHTML=D('ld',getDistrictAt(pl.x,pl.z).name)+D('ls',getStreetAt(pl.x,pl.z));radar(st);
+const pr=!pl.inVehicle&&pl.nearbyVehicle?`${S('pk','F')}Steal ${pl.nearbyVehicle.spec.name}`:pl.nearbyPoi?`${S('pk','M')}Open ${pl.nearbyPoi.name}`:'';
+tog('p',pr);if(pr)el.p.innerHTML=pr;
+const cm=ms.comms;tog('c',cm?.timer>0);if(cm?.timer>0)el.c.innerHTML=D('ca',av(cm.speaker))+D('cb',D('cm',S('cn',cm.speaker)+S('co',cm.role))+D('ct',cm.text));
+const v=pl.vehicle,wc=WEAPONS[pl.weaponIndex],cond=v?R(v.health/v.maxHealth*100):hp,nit=v?R(v.nitro):100;
+el.s.innerHTML=D('sp',S('sn',R((v?v.speed:pl.speed)*3.6))+S('su','KM/H'))+D('vn',v?v.spec.name.toUpperCase():`ON FOOT · ${wc.name.toUpperCase()}`)+D('vb',bar(v?'CHASSIS':'STAMINA',`${cond}%`,'bCd',cond)+bar(v?'NITRO':'AMMO',v?`${nit}%`:wc.inf?'∞':pl.ammo[wc.id],'bNt',nit));
+const rd=RADIO_STATIONS[au.state.stationIndex];el.r.innerHTML=S('rn',`♫ ${rd.name}`)+S('rt',rd.track);
+tog('x',!pl.inVehicle);tog('b',ms.bannerTimer>0&&ms.bannerText);if(ms.bannerTimer>0&&ms.bannerText)el.b.textContent=ms.bannerText;
 }
-
-export function createHudManager(hudRoot) {
-  hudRoot.innerHTML = `
-    <div class="hud-top-left">
-      <div id="hud-mission" class="glass-card mission-card"></div>
-      <div id="hud-dispatch" class="glass-card dispatch-card hidden"></div>
-    </div>
-    <div class="hud-top-right">
-      <div id="hud-wanted" class="glass-card wanted-card"></div>
-      <div id="hud-vitals" class="glass-card vitals-card"></div>
-      <div id="hud-weapons" class="glass-card weapon-bar"></div>
-      <div id="hud-favours" class="favours-row"></div>
-    </div>
-    <div id="hud-banner" class="banner-toast hidden"></div>
-    <div id="hud-crosshair" class="crosshair hidden"><div class="crosshair-dot"></div></div>
-    <div class="hud-bottom-left">
-      <div class="radar-shell"><canvas id="minimap-canvas" width="174" height="174"></canvas></div>
-      <div id="hud-loc" class="glass-card loc-pill"></div>
-    </div>
-    <div class="hud-bottom-center">
-      <div id="hud-prompt" class="action-prompt hidden"></div>
-      <div id="hud-comms" class="glass-card comms-card hidden"></div>
-    </div>
-    <div class="hud-bottom-right">
-      <div id="hud-speed" class="glass-card speed-card"></div>
-      <div id="hud-radio" class="glass-card radio-card"></div>
-    </div>
-  `;
-
-  const el = {
-    mission: hudRoot.querySelector('#hud-mission'),
-    dispatch: hudRoot.querySelector('#hud-dispatch'),
-    wanted: hudRoot.querySelector('#hud-wanted'),
-    vitals: hudRoot.querySelector('#hud-vitals'),
-    weapons: hudRoot.querySelector('#hud-weapons'),
-    favours: hudRoot.querySelector('#hud-favours'),
-    banner: hudRoot.querySelector('#hud-banner'),
-    crosshair: hudRoot.querySelector('#hud-crosshair'),
-    loc: hudRoot.querySelector('#hud-loc'),
-    prompt: hudRoot.querySelector('#hud-prompt'),
-    comms: hudRoot.querySelector('#hud-comms'),
-    speed: hudRoot.querySelector('#hud-speed'),
-    radio: hudRoot.querySelector('#hud-radio'),
-    minimap: hudRoot.querySelector('#minimap-canvas'),
-  };
-  const mmCtx = el.minimap.getContext('2d');
-
-  function drawMinimap(state) {
-    const { player, vehicles, missions, wanted, cameraCtrl } = state;
-    const w = 174;
-    const h = 174;
-    const cx = w / 2;
-    const cy = h / 2;
-    const scale = 0.34;
-    const camYaw = cameraCtrl.yaw;
-
-    mmCtx.clearRect(0, 0, w, h);
-    mmCtx.save();
-    mmCtx.beginPath();
-    mmCtx.arc(cx, cy, cx - 2, 0, Math.PI * 2);
-    mmCtx.clip();
-
-    // Deep turquoise ocean background
-    mmCtx.fillStyle = '#0c4a6e';
-    mmCtx.fillRect(0, 0, w, h);
-
-    // Rotate world around player facing camera forward UP on the radar
-    mmCtx.translate(cx, cy);
-    mmCtx.rotate(camYaw);
-
-    const toLocal = (wx, wz) => [-(wx - player.x) * scale, -(wz - player.z) * scale];
-    const drawRect = (minX, minZ, maxX, maxZ, fill) => {
-      const [x1, y1] = toLocal(maxX, maxZ);
-      const [x2, y2] = toLocal(minX, minZ);
-      mmCtx.fillStyle = fill;
-      mmCtx.fillRect(x1, y1, x2 - x1, y2 - y1);
-    };
-
-    // Mainland urban blocks, golden beach & Starlight Isle
-    drawRect(-410, -410, 268, 410, '#1e293b');
-    drawRect(268, -410, 322, 410, '#eab676');
-    drawRect(520, -210, 760, 210, '#1e3a34');
-    // Solaria Arch Bridge & Sky-Ring Pier
-    drawRect(258, -11, 558, 11, '#ef4444');
-    drawRect(266, 111, 418, 129, '#b47a49');
-
-    // Crisp road grid lines
-    mmCtx.strokeStyle = '#64748b';
-    mmCtx.lineWidth = 4.2;
-    for (let i = 0; i < WORLD.avenuesX.length; i += 1) {
-      const [x1, y1] = toLocal(WORLD.avenuesX[i], -380);
-      const [x2, y2] = toLocal(WORLD.avenuesX[i], 380);
-      mmCtx.beginPath(); mmCtx.moveTo(x1, y1); mmCtx.lineTo(x2, y2); mmCtx.stroke();
-    }
-    for (let j = 0; j < WORLD.streetsZ.length; j += 1) {
-      const [x1, y1] = toLocal(-380, WORLD.streetsZ[j]);
-      const [x2, y2] = toLocal(254, WORLD.streetsZ[j]);
-      mmCtx.beginPath(); mmCtx.moveTo(x1, y1); mmCtx.lineTo(x2, y2); mmCtx.stroke();
-    }
-
-    // Glowing GPS route line from player to active mission waypoint
-    const stage = getActiveStage(missions);
-    const [tx, ty] = toLocal(stage.x, stage.z);
-    mmCtx.strokeStyle = '#fbbf24';
-    mmCtx.lineWidth = 3;
-    mmCtx.setLineDash([5, 3]);
-    mmCtx.beginPath();
-    mmCtx.moveTo(0, 0);
-    mmCtx.lineTo(0, ty);
-    mmCtx.lineTo(tx, ty);
-    mmCtx.stroke();
-    mmCtx.setLineDash([]);
-
-    // Service POIs (garages, gun shops, safehouses)
-    for (let i = 0; i < SERVICE_POIS.length; i += 1) {
-      const [px, py] = toLocal(SERVICE_POIS[i].x, SERVICE_POIS[i].z);
-      mmCtx.fillStyle = SERVICE_POIS[i].color;
-      mmCtx.beginPath(); mmCtx.arc(px, py, 3.2, 0, Math.PI * 2); mmCtx.fill();
-    }
-
-    // Active Mission Star Blip
-    mmCtx.fillStyle = '#fbbf24';
-    mmCtx.beginPath(); mmCtx.arc(tx, ty, 5.2, 0, Math.PI * 2); mmCtx.fill();
-    mmCtx.strokeStyle = '#090d16'; mmCtx.lineWidth = 1.5; mmCtx.stroke();
-
-    // Police Units & AIR-1 Blips
-    for (let i = 0; i < vehicles.length; i += 1) {
-      const v = vehicles[i];
-      if (!v.spec.isPolice || v.destroyed) continue;
-      const [vx, vy] = toLocal(v.x, v.z);
-      mmCtx.fillStyle = v.spec.isHeli ? '#22d3ee' : (i % 2 === 0 ? '#ef4444' : '#3b82f6');
-      mmCtx.beginPath(); mmCtx.arc(vx, vy, v.spec.isHeli ? 4.6 : 3.5, 0, Math.PI * 2); mmCtx.fill();
-    }
-
-    mmCtx.restore();
-
-    // Centered crisp white Player Arrow pointing forward
-    mmCtx.fillStyle = '#ffffff';
-    mmCtx.beginPath();
-    mmCtx.moveTo(cx, cy - 7);
-    mmCtx.lineTo(cx + 5.5, cy + 6);
-    mmCtx.lineTo(cx, cy + 3);
-    mmCtx.lineTo(cx - 5.5, cy + 6);
-    mmCtx.closePath();
-    mmCtx.fill();
-
-    // North indicator on radar bezel
-    const nx = cx - Math.sin(camYaw) * 74;
-    const ny = cy + Math.cos(camYaw) * 74;
-    mmCtx.fillStyle = '#090d16';
-    mmCtx.beginPath(); mmCtx.arc(nx, ny, 8.5, 0, Math.PI * 2); mmCtx.fill();
-    mmCtx.fillStyle = '#fbbf24';
-    mmCtx.font = '800 10px "Segoe UI", sans-serif';
-    mmCtx.textAlign = 'center';
-    mmCtx.textBaseline = 'middle';
-    mmCtx.fillText('N', nx, ny + 0.5);
-  }
-
-  function update(state) {
-    const { player, missions, wanted, crew, audio, timeOfDay, elapsed } = state;
-    const m = getActiveMission(missions);
-    const st = getActiveStage(missions);
-
-    // 1. Top-Left: Mission Card
-    let segs = '';
-    for (let i = 0; i < m.stages.length; i += 1) {
-      const cls = i < missions.stageIndex ? 'done' : i === missions.stageIndex ? 'active' : '';
-      segs += `<div class="stage-seg ${cls}"></div>`;
-    }
-    el.mission.innerHTML = `
-      <div class="mission-kicker"><span>MISSION ${missions.missionIndex + 1} OF ${STORY_MISSIONS.length}</span><span>${m.act}</span></div>
-      <div class="mission-title">${m.title}</div>
-      <div class="stage-bar">${segs}</div>
-      <div class="mission-obj">${st.obj}</div>
-      <div class="mission-next"><strong>NEXT:</strong> ${st.next}</div>
-    `;
-
-    // 2. Top-Left: Live SBPD Tactical Dispatch Panel
-    const units = wanted.getActiveUnits(player);
-    if (wanted.state.stars > 0 && units.length > 0) {
-      el.dispatch.classList.remove('hidden');
-      let rows = '';
-      for (let i = 0; i < units.length; i += 1) {
-        const u = units[i];
-        rows += `<div class="dispatch-row"><span class="d-call">${u.callsign}</span><span class="d-dist">${u.dist}m</span><span class="d-badge t-${u.badge}">${u.tactic}</span></div>`;
-      }
-      el.dispatch.innerHTML = `
-        <div class="dispatch-head"><span><i class="dispatch-pulse"></i>SBPD TACTICAL DISPATCH</span><span>${units.length} ACTIVE</span></div>
-        <div class="dispatch-list">${rows}</div>
-      `;
-    } else {
-      el.dispatch.classList.add('hidden');
-    }
-
-    // 3. Top-Right: Wanted Stars & IN SIGHT Bar
-    const blink = Math.floor(elapsed * 4) % 2 === 0;
-    let starsHtml = '';
-    for (let s = 1; s <= 5; s += 1) {
-      const lit = s <= wanted.state.stars;
-      const cls = lit ? (wanted.state.inSight && blink ? 'alert' : 'lit') : '';
-      starsHtml += `<span class="star-icon ${cls}">★</span>`;
-    }
-    const sightPct = Math.round(wanted.state.sightMeter);
-    el.wanted.innerHTML = `
-      <div class="wanted-top"><span class="wanted-label">SBPD WANTED</span><div class="stars-row">${starsHtml}</div></div>
-      ${wanted.state.stars > 0 ? `<div class="sight-row"><span class="sight-tag ${wanted.state.inSight ? 'hot' : 'cool'}">${wanted.state.jamTimer > 0 ? 'JAMMED' : (wanted.state.inSight ? 'IN SIGHT' : 'EVADING')}</span><div class="bar-track"><div class="bar-fill ${wanted.state.inSight ? 'bar-sight-hot' : 'bar-sight-cool'}" style="width:${sightPct}%"></div></div></div>` : ''}
-    `;
-
-    // 4. Top-Right: Cash, Clock, Respect Rank, Health & Armor
-    const rank = getRespectRank(player.respect);
-    el.vitals.innerHTML = `
-      <div class="vitals-head">
-        <div class="cash-val">$${Math.round(player.cash).toLocaleString()}</div>
-        <div class="clock-rank"><div class="clock-val">${formatClock(timeOfDay)}</div><div class="rank-val">RANK ${rank.rank} · ${rank.title.toUpperCase()}</div></div>
-      </div>
-      <div class="vital-bars">
-        <div class="v-item"><div class="v-lbl"><span>HEALTH</span><span>${Math.round(player.health)}</span></div><div class="bar-track"><div class="bar-fill bar-hp" style="width:${Math.round(player.health)}%"></div></div></div>
-        <div class="v-item"><div class="v-lbl"><span>ARMOUR</span><span>${Math.round(player.armor)}</span></div><div class="bar-track"><div class="bar-fill bar-arm" style="width:${Math.round(player.armor)}%"></div></div></div>
-      </div>
-    `;
-
-    // 5. Top-Right: Compact 8-Slot Weapon Hotbar
-    let wHtml = '';
-    for (let i = 0; i < WEAPONS.length; i += 1) {
-      const w = WEAPONS[i];
-      const active = i === player.weaponIndex ? 'active' : '';
-      const ammoStr = w.inf ? '∞' : String(player.ammo[w.id] || 0);
-      wHtml += `<div class="w-slot ${active}" style="color:${active ? '#fbbf24' : '#cbd5e1'}"><span class="w-num">${i + 1}</span>${WEAPON_SVGS[w.id] || ''}<span class="w-ammo">${ammoStr}</span></div>`;
-    }
-    el.weapons.innerHTML = wHtml;
-
-    // 6. Top-Right: Crew Favours Status Badges
-    let favHtml = '';
-    for (let i = 0; i < CREW_ROSTER.length; i += 1) {
-      const c = CREW_ROSTER[i];
-      const cd = Math.ceil(crew.cooldowns[c.id] || 0);
-      favHtml += `<div class="fav-pill ${cd <= 0 ? 'ready' : 'cooling'}"><div class="fav-key">[${c.key}]</div><div class="fav-name">${c.short}</div><div class="fav-stat">${cd <= 0 ? 'READY' : `${cd}s`}</div></div>`;
-    }
-    el.favours.innerHTML = favHtml;
-
-    // 7. Bottom-Left: District, Street & Circular Rotated GPS Minimap
-    const dist = getDistrictAt(player.x, player.z);
-    const street = getStreetAt(player.x, player.z);
-    el.loc.innerHTML = `<div class="loc-dist">${dist.name}</div><div class="loc-street">${street}</div>`;
-    drawMinimap(state);
-
-    // 8. Bottom-Center: Carjack / POI Prompt & Crew Comms
-    if (!player.inVehicle && player.nearbyVehicle) {
-      el.prompt.classList.remove('hidden');
-      el.prompt.innerHTML = `<span class="prompt-key">F</span>Steal ${player.nearbyVehicle.spec.name}`;
-    } else if (player.nearbyPoi) {
-      el.prompt.classList.remove('hidden');
-      el.prompt.innerHTML = `<span class="prompt-key">M</span>Open ${player.nearbyPoi.name}`;
-    } else {
-      el.prompt.classList.add('hidden');
-    }
-
-    if (missions.comms && missions.comms.timer > 0) {
-      el.comms.classList.remove('hidden');
-      el.comms.innerHTML = `
-        <div class="comms-avatar">${makeAvatarSvg(missions.comms.speaker)}</div>
-        <div class="comms-body">
-          <div class="comms-meta"><span class="comms-name">${missions.comms.speaker}</span><span class="comms-role">${missions.comms.role}</span></div>
-          <div class="comms-text">${missions.comms.text}</div>
-        </div>
-      `;
-    } else {
-      el.comms.classList.add('hidden');
-    }
-
-    // 9. Bottom-Right: Digital Speedometer & FM Radio Card
-    const v = player.vehicle;
-    const kmh = Math.round((v ? v.speed : player.speed) * 3.6);
-    const condPct = v ? Math.round((v.health / v.maxHealth) * 100) : Math.round(player.health);
-    const nitroPct = v ? Math.round(v.nitro) : 100;
-    const vehTitle = v ? v.spec.name.toUpperCase() : `ON FOOT · ${WEAPONS[player.weaponIndex].name.toUpperCase()}`;
-    el.speed.innerHTML = `
-      <div class="speed-top"><span class="speed-num">${kmh}</span><span class="speed-unit">KM/H</span></div>
-      <div class="veh-name">${vehTitle}</div>
-      <div class="veh-bars">
-        <div class="v-item"><div class="v-lbl"><span>${v ? 'CHASSIS' : 'STAMINA'}</span><span>${condPct}%</span></div><div class="bar-track"><div class="bar-fill bar-cond" style="width:${condPct}%"></div></div></div>
-        <div class="v-item"><div class="v-lbl"><span>${v ? 'NITRO' : 'AMMO'}</span><span>${v ? `${nitroPct}%` : (WEAPONS[player.weaponIndex].inf ? '∞' : player.ammo[WEAPONS[player.weaponIndex].id])}</span></div><div class="bar-track"><div class="bar-fill bar-nitro" style="width:${nitroPct}%"></div></div></div>
-      </div>
-    `;
-
-    const stRadio = RADIO_STATIONS[audio.state.stationIndex];
-    el.radio.innerHTML = `<span class="radio-station">♫ ${stRadio.name}</span><span class="radio-track">${stRadio.track}</span>`;
-
-    // 10. Center Reticle & Mission Banner
-    el.crosshair.classList.toggle('hidden', player.inVehicle);
-    if (missions.bannerTimer > 0 && missions.bannerText) {
-      el.banner.classList.remove('hidden');
-      el.banner.textContent = missions.bannerText;
-    } else {
-      el.banner.classList.add('hidden');
-    }
-  }
-
-  return { update };
+return{update};
 }

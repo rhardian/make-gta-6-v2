@@ -1,276 +1,78 @@
-// 8-weapon combat & ballistics engine: melee, sidearm, SMG, shotgun, carbine, marksman,
-// arcing grenades, RPG-7X rockets, golden bullet tracers, explosions, and floating damage popups.
+// 8-weapon combat & ballistics: hitscan, thin tracers, grenades, RPG-7X & explosions.
+import*as THREE from'three';
+import{WEAPONS}from'./config.js';
+const{sin,cos,hypot,max,min,round,random:R}=Math,V3=(x,y,z)=>new THREE.Vector3(x,y,z);
 
-import * as THREE from 'three';
-import { WEAPONS } from './config.js';
+export function createCombatSystem(scene,fx,audio){
+const ord=[],pGeo=new THREE.SphereGeometry(.16,6,6),fn=(...a)=>fx.spawnFloatingNumber(...a),sp=(...a)=>fx.spawnSparks(...a);
+const kill=(p,pl)=>{p.alive=false;if(pl){pl.cash+=p.cashDrop;pl.stats.eliminations++;pl.stats.totalEarnings+=p.cashDrop;}};
 
-export function createCombatSystem(scene, effects, audio) {
-  const activeOrdnance = [];
-  const projGeo = new THREE.SphereGeometry(0.18, 6, 6);
-
-  function alertNearbyCivilians(pedestrians, x, z, radius = 42) {
-    for (let i = 0; i < pedestrians.length; i += 1) {
-      const p = pedestrians[i];
-      if (p.alive && p.role === 'civilian' && Math.hypot(p.x - x, p.z - z) < radius) {
-        p.panicTimer = 6.5;
-      }
-    }
-  }
-
-  function damageVehicle(v, dmg, vehicles, pedestrians, player) {
-    if (v.destroyed) return;
-    v.health -= dmg;
-    if (v.health <= 0) {
-      v.health = 0;
-      v.destroyed = true;
-      v.burning = true;
-      effects.spawnExplosion(v.x, v.y + 0.6, v.z, 1.35);
-      effects.spawnFloatingNumber(v.x, v.y + 3.2, v.z, 'VEHICLE DESTROYED!', '#fb923c');
-      if (audio) audio.playExplosion();
-      // Splash damage to nearby enemies
-      for (let i = 0; i < pedestrians.length; i += 1) {
-        const p = pedestrians[i];
-        if (!p.alive || p.role === 'partner') continue;
-        if (Math.hypot(p.x - v.x, p.z - v.z) < 12) {
-          p.health = 0;
-          p.alive = false;
-          if (player) {
-            player.cash += p.cashDrop;
-            player.stats.eliminations += 1;
-          }
-        }
-      }
-    }
-  }
-
-  function detonateAt(x, y, z, radius, dmg, vehicles, pedestrians, player, wanted) {
-    effects.spawnExplosion(x, y, z, radius / 10);
-    if (audio) audio.playExplosion();
-    for (let i = 0; i < pedestrians.length; i += 1) {
-      const p = pedestrians[i];
-      if (!p.alive || p.role === 'partner') continue;
-      const d = Math.hypot(p.x - x, p.z - z);
-      if (d < radius) {
-        const hitDmg = Math.round(dmg * (1 - d / radius));
-        p.health -= hitDmg;
-        effects.spawnFloatingNumber(p.x, p.y + 2.3, p.z, `-${hitDmg}`, '#ff5e78');
-        if (p.health <= 0) {
-          p.alive = false;
-          player.cash += p.cashDrop;
-          player.stats.eliminations += 1;
-          player.stats.totalEarnings += p.cashDrop;
-          if (p.role === 'police' && wanted) wanted.addHeat(1.8, p.x, p.z);
-        }
-      }
-    }
-    for (let i = 0; i < vehicles.length; i += 1) {
-      const v = vehicles[i];
-      if (v.destroyed || v.spec.isHeli) continue;
-      const d = Math.hypot(v.x - x, v.z - z);
-      if (d < radius) {
-        damageVehicle(v, dmg * (1 - d / radius) * 1.4, vehicles, pedestrians, player);
-      }
-    }
-  }
-
-  function firePlayerWeapon(player, aimYaw, aimPitch, vehicles, pedestrians, wanted, rng) {
-    const w = WEAPONS[player.weaponIndex];
-    if (player.fireCooldown > 0) return false;
-    if (!w.inf && (player.ammo[w.id] || 0) <= 0) return false;
-
-    player.fireCooldown = w.cd;
-    if (!w.inf) player.ammo[w.id] -= 1;
-
-    const muzzleX = player.x + Math.sin(aimYaw) * 0.9;
-    const muzzleY = player.y + (player.inVehicle ? 1.3 : 1.42);
-    const muzzleZ = player.z + Math.cos(aimYaw) * 0.9;
-
-    if (w.id === 'fists') {
-      for (let i = 0; i < pedestrians.length; i += 1) {
-        const p = pedestrians[i];
-        if (!p.alive || p.role === 'partner') continue;
-        if (Math.hypot(p.x - player.x, p.z - player.z) < w.range) {
-          p.health -= w.dmg;
-          effects.spawnFloatingNumber(p.x, p.y + 2.1, p.z, `-${w.dmg}`, '#fde047');
-          if (p.health <= 0) {
-            p.alive = false;
-            player.cash += p.cashDrop;
-            player.stats.eliminations += 1;
-          }
-          if (wanted) wanted.addHeat(0.6, p.x, p.z);
-          break;
-        }
-      }
-      return true;
-    }
-
-    if (audio) audio.playGunshot(w.id);
-    effects.spawnMuzzleFlash(muzzleX, muzzleY, muzzleZ, w.color);
-    alertNearbyCivilians(pedestrians, player.x, player.z, 46);
-
-    if (w.explosive) {
-      const mat = new THREE.MeshBasicMaterial({ color: w.color });
-      const mesh = new THREE.Mesh(projGeo, mat);
-      mesh.position.set(muzzleX, muzzleY, muzzleZ);
-      scene.add(mesh);
-      const spd = w.id === 'cobre_launcher' ? 58 : 26;
-      activeOrdnance.push({
-        mesh,
-        x: muzzleX, y: muzzleY, z: muzzleZ,
-        vx: Math.sin(aimYaw) * Math.cos(aimPitch) * spd,
-        vy: Math.sin(aimPitch) * spd + (w.id === 'sol_grenade' ? 6.5 : 0.6),
-        vz: Math.cos(aimYaw) * Math.cos(aimPitch) * spd,
-        gravity: w.id === 'sol_grenade' ? 18 : 1.2,
-        dmg: w.dmg,
-        radius: w.radius,
-        life: 2.8,
-        color: w.color,
-      });
-      if (wanted) wanted.addHeat(1.4, player.x, player.z);
-      return true;
-    }
-
-    // Raycast/ballistic pellet shots with golden tracer streaks
-    for (let pIdx = 0; pIdx < w.pellets; pIdx += 1) {
-      const sy = aimYaw + (rng() - 0.5) * w.spread;
-      const sp = aimPitch + (rng() - 0.5) * w.spread * 0.6;
-      const dx = Math.sin(sy) * Math.cos(sp);
-      const dy = Math.sin(sp);
-      const dz = Math.cos(sy) * Math.cos(sp);
-
-      let bestT = w.range;
-      let hitPed = null;
-      let hitVeh = null;
-
-      for (let i = 0; i < pedestrians.length; i += 1) {
-        const ped = pedestrians[i];
-        if (!ped.alive || ped.role === 'partner') continue;
-        const ox = ped.x - muzzleX;
-        const oy = (ped.y + 1.15) - muzzleY;
-        const oz = ped.z - muzzleZ;
-        const proj = ox * dx + oy * dy + oz * dz;
-        if (proj > 0 && proj < bestT) {
-          const perp2 = (ox - dx * proj) ** 2 + (oy - dy * proj) ** 2 + (oz - dz * proj) ** 2;
-          if (perp2 < 1.15) {
-            bestT = proj;
-            hitPed = ped;
-            hitVeh = null;
-          }
-        }
-      }
-
-      for (let i = 0; i < vehicles.length; i += 1) {
-        const v = vehicles[i];
-        if (v === player.vehicle || v.destroyed || v.spec.isHeli) continue;
-        const ox = v.x - muzzleX;
-        const oz = v.z - muzzleZ;
-        const proj = ox * dx + oz * dz;
-        if (proj > 0 && proj < bestT) {
-          const perp2 = (ox - dx * proj) ** 2 + (oz - dz * proj) ** 2;
-          if (perp2 < (v.spec.w * 0.72) ** 2) {
-            bestT = proj;
-            hitVeh = v;
-            hitPed = null;
-          }
-        }
-      }
-
-      const endP = new THREE.Vector3(muzzleX + dx * bestT, Math.max(0.2, muzzleY + dy * bestT), muzzleZ + dz * bestT);
-      effects.spawnTracer(new THREE.Vector3(muzzleX, muzzleY, muzzleZ), endP, w.color, 0.085, 0.13);
-
-      if (hitPed) {
-        const crit = rng() < 0.28;
-        const dmg = Math.round(w.dmg * (crit ? 1.65 : 1.0));
-        hitPed.health -= dmg;
-        effects.spawnSparks(endP.x, endP.y, endP.z, 5, '#fb7185');
-        effects.spawnFloatingNumber(hitPed.x, hitPed.y + 2.25, hitPed.z, crit ? `CRIT -${dmg}!` : `-${dmg}`, crit ? '#fde047' : '#ffffff');
-        if (hitPed.health <= 0) {
-          hitPed.alive = false;
-          player.cash += hitPed.cashDrop;
-          player.respect += hitPed.role === 'syndicate' ? 25 : 10;
-          player.stats.eliminations += 1;
-          player.stats.totalEarnings += hitPed.cashDrop;
-          effects.spawnFloatingNumber(hitPed.x, hitPed.y + 2.8, hitPed.z, `+$${hitPed.cashDrop}`, '#34d399');
-        }
-        if (wanted) wanted.addHeat(hitPed.role === 'police' ? 1.5 : 0.45, hitPed.x, hitPed.z);
-      } else if (hitVeh) {
-        effects.spawnSparks(endP.x, endP.y, endP.z, 6, '#fde047');
-        damageVehicle(hitVeh, w.dmg * 0.85, vehicles, pedestrians, player);
-        if (wanted && hitVeh.spec.isPolice) wanted.addHeat(0.85, hitVeh.x, hitVeh.z);
-      }
-    }
-    return true;
-  }
-
-  function fireNpcShot(npc, player) {
-    const start = new THREE.Vector3(npc.x + Math.sin(npc.yaw) * 0.8, npc.y + 1.4, npc.z + Math.cos(npc.yaw) * 0.8);
-    const spread = 1.6;
-    const end = new THREE.Vector3(
-      player.x + (Math.random() - 0.5) * spread,
-      player.y + 1.2 + (Math.random() - 0.5) * 0.6,
-      player.z + (Math.random() - 0.5) * spread,
-    );
-    const col = npc.role === 'police' ? '#38bdf8' : '#fb7185';
-    effects.spawnMuzzleFlash(start.x, start.y, start.z, col);
-    effects.spawnTracer(start, end, col, 0.08, 0.14);
-
-    if (Math.random() < (player.inVehicle ? 0.22 : 0.34)) {
-      const dmg = npc.role === 'syndicate' ? 7 : 6;
-      if (player.armor > 0) {
-        const absorb = Math.min(player.armor, dmg * 0.7);
-        player.armor -= absorb;
-        player.health = Math.max(10, player.health - (dmg - absorb));
-      } else {
-        player.health = Math.max(10, player.health - dmg);
-      }
-    }
-  }
-
-  function firePartnerShot(partner, target) {
-    const start = new THREE.Vector3(partner.x + Math.sin(partner.yaw) * 0.8, partner.y + 1.4, partner.z + Math.cos(partner.yaw) * 0.8);
-    const end = new THREE.Vector3(target.x, target.y + 1.2, target.z);
-    effects.spawnMuzzleFlash(start.x, start.y, start.z, '#38bdf8');
-    effects.spawnTracer(start, end, '#22d3ee', 0.08, 0.14);
-    target.health -= 18;
-    if (target.health <= 0) target.alive = false;
-  }
-
-  function update(dt, player, vehicles, pedestrians, wanted) {
-    player.fireCooldown = Math.max(0, player.fireCooldown - dt);
-    for (let i = activeOrdnance.length - 1; i >= 0; i -= 1) {
-      const o = activeOrdnance[i];
-      o.life -= dt;
-      o.vy -= o.gravity * dt;
-      o.x += o.vx * dt;
-      o.y += o.vy * dt;
-      o.z += o.vz * dt;
-      o.mesh.position.set(o.x, o.y, o.z);
-      effects.spawnParticle(o.x, o.y, o.z, 0, 0.6, 0, 0.35, o.color, 0.2, { additive: true });
-
-      let boom = o.life <= 0 || o.y <= 0.3;
-      if (!boom) {
-        for (let j = 0; j < vehicles.length; j += 1) {
-          const v = vehicles[j];
-          if (v !== player.vehicle && !v.spec.isHeli && Math.hypot(v.x - o.x, v.z - o.z) < 2.8) {
-            boom = true; break;
-          }
-        }
-      }
-      if (boom) {
-        detonateAt(o.x, Math.max(0.4, o.y), o.z, o.radius, o.dmg, vehicles, pedestrians, player, wanted);
-        scene.remove(o.mesh);
-        o.mesh.material.dispose();
-        activeOrdnance.splice(i, 1);
-      }
-    }
-  }
-
-  return {
-    firePlayerWeapon,
-    fireNpcShot,
-    firePartnerShot,
-    damageVehicle,
-    detonateAt,
-    update,
-  };
+function damageVehicle(v,dmg,vh,pd,pl){
+if(v.destroyed)return;v.health-=dmg;
+if(v.health<=0){
+v.health=0;v.destroyed=v.burning=true;fx.spawnExplosion(v.x,v.y+.6,v.z,1.3);
+fn(v.x,v.y+3.2,v.z,'VEHICLE DESTROYED!','#fb923c');audio?.playExplosion();
+for(const p of pd)if(p.alive&&p.role!=='partner'&&hypot(p.x-v.x,p.z-v.z)<12){p.health=0;kill(p,pl);}
+}
+}
+function detonateAt(x,y,z,rad,dmg,vh,pd,pl,wn){
+fx.spawnExplosion(x,y,z,rad/10);audio?.playExplosion();
+for(const p of pd){
+if(!p.alive||p.role==='partner')continue;const d=hypot(p.x-x,p.z-z);
+if(d<rad){const h=round(dmg*(1-d/rad));p.health-=h;fn(p.x,p.y+2.3,p.z,`-${h}`,'#ff5e78');if(p.health<=0){kill(p,pl);if(p.role==='police'&&wn)wn.addHeat(1.8,p.x,p.z);}}
+}
+for(const v of vh){const d=hypot(v.x-x,v.z-z);if(!v.destroyed&&!v.spec.isHeli&&d<rad)damageVehicle(v,dmg*(1-d/rad)*1.4,vh,pd,pl);}
+}
+function firePlayerWeapon(pl,yaw,pit,vh,pd,wn,rng){
+const w=WEAPONS[pl.weaponIndex];if(pl.fireCooldown>0||(!w.inf&&(pl.ammo[w.id]||0)<=0))return false;
+pl.fireCooldown=w.cd;if(!w.inf)pl.ammo[w.id]--;
+const mx=pl.x+sin(yaw)*.9,my=pl.y+(pl.inVehicle?1.3:1.42),mz=pl.z+cos(yaw)*.9;
+if(w.id==='fists'){
+for(const p of pd)if(p.alive&&p.role!=='partner'&&hypot(p.x-pl.x,p.z-pl.z)<w.range){
+p.health-=w.dmg;fn(p.x,p.y+2.1,p.z,`-${w.dmg}`,'#fde047');if(p.health<=0)kill(p,pl);wn?.addHeat(.6,p.x,p.z);break;
+}
+return true;
+}
+audio?.playGunshot(w.id);fx.spawnMuzzleFlash(mx,my,mz,w.color,.78);
+for(const p of pd)if(p.alive&&p.role==='civilian'&&hypot(p.x-pl.x,p.z-pl.z)<46)p.panicTimer=6.5;
+if(w.explosive){
+const m=new THREE.Mesh(pGeo,new THREE.MeshBasicMaterial({color:w.color}));m.position.set(mx,my,mz);scene.add(m);
+const s=w.id==='cobre_launcher'?58:26;
+ord.push({m,x:mx,y:my,z:mz,vx:sin(yaw)*cos(pit)*s,vy:sin(pit)*s+(w.id==='sol_grenade'?6.5:.6),vz:cos(yaw)*cos(pit)*s,g:w.id==='sol_grenade'?18:1.2,dmg:w.dmg,rad:w.radius,life:2.8,col:w.color});
+wn?.addHeat(1.4,pl.x,pl.z);return true;
+}
+for(let k=0;k<w.pellets;k++){
+const sy=yaw+(rng()-.5)*w.spread,pA=pit+(rng()-.5)*w.spread*.6,dx=sin(sy)*cos(pA),dy=sin(pA),dz=cos(sy)*cos(pA);
+let bT=w.range,hP=null,hV=null;
+for(const p of pd){if(!p.alive||p.role==='partner')continue;const ox=p.x-mx,oy=p.y+1.15-my,oz=p.z-mz,pr=ox*dx+oy*dy+oz*dz;if(pr>0&&pr<bT&&(ox-dx*pr)**2+(oy-dy*pr)**2+(oz-dz*pr)**2<1.15){bT=pr;hP=p;hV=null;}}
+for(const v of vh){if(v===pl.vehicle||v.destroyed||v.spec.isHeli)continue;const ox=v.x-mx,oz=v.z-mz,pr=ox*dx+oz*dz;if(pr>0&&pr<bT&&(ox-dx*pr)**2+(oz-dz*pr)**2<(v.spec.w*.72)**2){bT=pr;hV=v;hP=null;}}
+const end=V3(mx+dx*bT,max(.2,my+dy*bT),mz+dz*bT);fx.spawnTracer(V3(mx,my,mz),end,w.color,.032,.13);
+if(hP){
+const cr=rng()<.28,d=round(w.dmg*(cr?1.65:1));hP.health-=d;sp(end.x,end.y,end.z,5,'#ff8c1a');
+fn(hP.x,hP.y+2.25,hP.z,cr?`CRIT -${d}!`:`-${d}`,cr?'#fde047':'#fff');
+if(hP.health<=0){kill(hP,pl);pl.respect+=hP.role==='syndicate'?25:10;fn(hP.x,hP.y+2.8,hP.z,`+$${hP.cashDrop}`,'#34d399');}
+wn?.addHeat(hP.role==='police'?1.5:.45,hP.x,hP.z);
+}else if(hV){sp(end.x,end.y,end.z,6,'#ff8c1a');damageVehicle(hV,w.dmg*.85,vh,pd,pl);if(wn&&hV.spec.isPolice)wn.addHeat(.85,hV.x,hV.z);}
+}
+return true;
+}
+function fireNpcShot(n,pl){
+const s=V3(n.x+sin(n.yaw)*.8,n.y+1.4,n.z+cos(n.yaw)*.8),col=n.role==='police'?'#38bdf8':'#fb7185';
+fx.spawnMuzzleFlash(s.x,s.y,s.z,col,.72);fx.spawnTracer(s,V3(pl.x+(R()-.5)*1.6,pl.y+1.2+(R()-.5)*.6,pl.z+(R()-.5)*1.6),col,.03,.14);
+if(R()<(pl.inVehicle?.22:.34)){const d=n.role==='syndicate'?7:6,a=min(pl.armor,d*.7);pl.armor-=a;pl.health=max(10,pl.health-(d-a));}
+}
+function firePartnerShot(p,t){
+const s=V3(p.x+sin(p.yaw)*.8,p.y+1.4,p.z+cos(p.yaw)*.8);
+fx.spawnMuzzleFlash(s.x,s.y,s.z,'#38bdf8',.72);fx.spawnTracer(s,V3(t.x,t.y+1.2,t.z),'#22d3ee',.03,.14);
+t.health-=18;if(t.health<=0)t.alive=false;
+}
+function update(dt,pl,vh,pd,wn){
+pl.fireCooldown=max(0,pl.fireCooldown-dt);
+for(let i=ord.length-1;i>=0;i--){
+const o=ord[i];o.life-=dt;o.vy-=o.g*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.z+=o.vz*dt;
+o.m.position.set(o.x,o.y,o.z);fx.spawnParticle(o.x,o.y,o.z,0,.6,0,.3,o.col,.2,{additive:true});
+if(o.life<=0||o.y<=.3||vh.some(v=>v!==pl.vehicle&&!v.spec.isHeli&&hypot(v.x-o.x,v.z-o.z)<2.8)){detonateAt(o.x,max(.4,o.y),o.z,o.rad,o.dmg,vh,pd,pl,wn);scene.remove(o.m);o.m.material.dispose();ord.splice(i,1);}
+}
+}
+return{firePlayerWeapon,fireNpcShot,firePartnerShot,damageVehicle,detonateAt,update};
 }

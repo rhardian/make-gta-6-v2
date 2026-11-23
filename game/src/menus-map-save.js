@@ -1,446 +1,93 @@
-// Bespoke Start / Title Screen (metallic sunset-chrome emblem over elevated 3D coastal panorama)
-// and full-screen tabbed Pause & Tactical Atlas Menu (MAP | MISSIONS | STATS | GARAGE | CREW | SETTINGS | SAVE).
+// Title Screen & Tactical Atlas (7-district vector map, M1-M10 pills, completion donut, saves).
+import{DISTRICTS,GARAGE_UPGRADES,SERVICE_POIS,VEHICLES,WEAPONS,WORLD}from'./config.js';
+import{applyGarageOrShopPurchase,buyProperty,SIDE_ACTIVITIES}from'./activities-economy.js';
+import{computeCompletionPercent,CREW_ROSTER,getRespectRank,triggerCrewFavour}from'./crew-progression.js';
+import{getActiveStage,startMission,STORY_MISSIONS}from'./missions-story.js';
+import{getDistrictAt}from'./world-city.js';
 
-import { DISTRICTS, GARAGE_UPGRADES, SERVICE_POIS, VEHICLES, WEAPONS, WORLD } from './config.js';
-import { applyGarageOrShopPurchase, buyProperty, SIDE_ACTIVITIES } from './activities-economy.js';
-import { computeCompletionPercent, CREW_ROSTER, getRespectRank, triggerCrewFavour } from './crew-progression.js';
-import { getActiveStage, startMission, STORY_MISSIONS } from './missions-story.js';
+const TABS=['MAP','MISSIONS','STATS','GARAGE','CREW','SETTINGS','SAVE'];
+const LOGO='<svg viewBox="0 0 470 128" width="460" height="124"><defs><linearGradient id="sG" x2="0" y2="1"><stop offset="0%" stop-color="#fff8c8"/><stop offset="48%" stop-color="#ff9b3d"/><stop offset="100%" stop-color="#ff3366"/></linearGradient><linearGradient id="cG" x2="0" y2="1"><stop offset="0%" stop-color="#fff"/><stop offset="38%" stop-color="#fff0cc"/><stop offset="52%" stop-color="#f59e0b"/><stop offset="68%" stop-color="#ff5e78"/><stop offset="100%" stop-color="#ffd166"/></linearGradient><filter id="sh"><feDropShadow dy="4" stdDeviation="5" flood-color="#071226" flood-opacity=".72"/></filter></defs><circle cx="58" cy="58" r="42" fill="url(#sG)" opacity=".96"/><path d="M14 61h88v4H14zm4 10h80v4H18zm6 10h68v4H24z" fill="#0c2648" opacity=".62"/><g font-family="Segoe UI,Impact,sans-serif" font-weight="900" stroke="#0b1528" paint-order="stroke" filter="url(#sh)"><text x="16" y="70" font-size="58" letter-spacing="3.5" fill="url(#cG)" stroke-width="3">SOLARIA BAY</text><text x="20" y="112" font-size="23" letter-spacing="9.5" fill="#fffdf5" stroke-width="2">SUN &amp; SYNDICATE</text></g><rect x="18" y="82" width="424" height="3.5" rx="2" fill="url(#sG)"/></svg>';
+const donut=p=>`<svg viewBox="0 0 64 64" width="62" height="62"><defs><linearGradient id="dg" x2="1" y2="1"><stop offset="0%" stop-color="#22d3ee"/><stop offset="55%" stop-color="#34d399"/><stop offset="100%" stop-color="#fbbf24"/></linearGradient></defs><g fill="none" stroke-width="6.5"><circle cx="32" cy="32" r="26" stroke="#fff2"/><circle cx="32" cy="32" r="26" stroke="url(#dg)" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="${(163.4*(1-p/100)).toFixed(1)}" transform="rotate(-90 32 32)"/></g><g text-anchor="middle"><text x="32" y="34" fill="#fff" font-size="14" font-weight="900">${p}%</text><text x="32" y="45" fill="#fbbf24" font-size="6.4" font-weight="800" letter-spacing=".6">COMPLETE</text></g></svg>`;
+const D=(c,h)=>`<div class="${c}">${h}</div>`,S=(c,h)=>`<span class="${c}">${h}</span>`,B=(c,a,h)=>`<button class="${c}" ${a}>${h}</button>`,SP=h=>`<span>${h}</span>`;
+const lr=(l,r,c='')=>D(`lr ${c}`,l+r),ub=(a,l,r)=>B('ub',a,SP(l)+S('uc',r)),pan=(t1,c1,t2,c2)=>D('gc af',`<div>${D('at2',t1)}${c1}</div><div>${D('at2',t2)}${c2}</div>`),$=n=>`$${Math.round(n).toLocaleString()}`;
 
-const ATLAS_TABS = ['MAP', 'MISSIONS', 'STATS', 'GARAGE', 'CREW', 'SETTINGS', 'SAVE'];
+export function createMenuManager(root,act){
+let tab='MAP',note='';
 
-const TITLE_EMBLEM_SVG = `
-<svg viewBox="0 0 430 116" width="420" height="114" aria-label="Solaria Bay: Sun and Syndicate">
-  <defs>
-    <linearGradient id="sunGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#fff4b8"/>
-      <stop offset="48%" stop-color="#ff9b42"/>
-      <stop offset="100%" stop-color="#ff3b6b"/>
-    </linearGradient>
-    <linearGradient id="chromeGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="42%" stop-color="#ffe7c2"/>
-      <stop offset="56%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#ff4d79"/>
-    </linearGradient>
-    <filter id="softGlow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#050814" flood-opacity="0.82"/></filter>
-  </defs>
-  <circle cx="54" cy="54" r="36" fill="url(#sunGrad)" opacity="0.92"/>
-  <rect x="14" y="57" width="80" height="4" fill="#090d16" opacity="0.65"/>
-  <rect x="18" y="66" width="72" height="4" fill="#090d16" opacity="0.72"/>
-  <rect x="24" y="75" width="60" height="4" fill="#090d16" opacity="0.78"/>
-  <text x="18" y="64" font-family="'Segoe UI', Impact, sans-serif" font-size="52" font-weight="900" letter-spacing="3" fill="url(#chromeGrad)" stroke="#0b1020" stroke-width="2.5" filter="url(#softGlow)">SOLARIA BAY</text>
-  <rect x="22" y="76" width="382" height="3" rx="1.5" fill="url(#sunGrad)"/>
-  <text x="24" y="102" font-family="'Segoe UI', sans-serif" font-size="21" font-weight="900" letter-spacing="8.5" fill="#fef3c7" filter="url(#softGlow)">SUN &amp; SYNDICATE</text>
-</svg>`;
+function drawMap(cv,st){
+const x=cv.getContext('2d'),w=cv.width,h=cv.height,T=6.29,P=(a,b)=>[(a+430)/1240*w,(b+430)/860*h];
+const rc=(a,b,c,d,f,s)=>{const[x1,y1]=P(a,b),[x2,y2]=P(c,d);x.fillStyle=f;x.fillRect(x1,y1,x2-x1,y2-y1);if(s){x.strokeStyle=s;x.lineWidth=1.2;x.strokeRect(x1,y1,x2-x1,y2-y1);}};
+const ln=(a,b,c,d,col,lw,ds=[])=>{x.strokeStyle=col;x.lineWidth=lw;x.setLineDash(ds);x.beginPath();x.moveTo(...P(a,b));x.lineTo(...P(c,d));x.stroke();x.setLineDash([]);};
+const cir=(cx,cy,r,f,s,lw=1.4)=>{x.beginPath();x.arc(cx,cy,r,0,T);if(f){x.fillStyle=f;x.fill();}if(s){x.strokeStyle=s;x.lineWidth=lw;x.stroke();}};
+const rr=(a,b,W,H,r,f,s,lw=1)=>{x.beginPath();x.roundRect(a,b,W,H,r);if(f){x.fillStyle=f;x.fill();}if(s){x.strokeStyle=s;x.lineWidth=lw;x.stroke();}};
+const sea=x.createLinearGradient(0,0,w,h);sea.addColorStop(0,'#094170');sea.addColorStop(.5,'#0e749b');sea.addColorStop(1,'#084c75');x.fillStyle=sea;x.fillRect(0,0,w,h);
+for(const[ox,f]of[[34,'#22d3ee2e'],[14,'#38bdf838'],[0,'#f3ce84']]){x.beginPath();x.moveTo(...P(-412,-412));x.lineTo(...P(296+ox,-412));for(const[a,b]of[[322,-280],[336,-150],[324,0],[338,130],[318,280],[302,412]])x.lineTo(...P(a+ox,b));x.lineTo(...P(-412,412));x.closePath();x.fillStyle=f;x.fill();}
+rc(-412,-412,272,412,'#1b2638');
+for(const[p,f]of[[28,'#22d3ee33'],[0,'#f3ce84'],[-12,'#1d5444']]){const[a,b]=P(512-p,-218-p),[c,d]=P(768+p,218+p);rr(a,b,c-a,d-b,24+p*.3,f);}
+for(const d of DISTRICTS)rc(d.minX,d.minZ,d.maxX,d.maxZ,d.color+'20',d.color+'66');
+for(const[px,pz,pw,pd]of[[-300,-180,74,72],[60,-60,72,72],[-180,60,72,72],[180,-180,62,68],[640,-10,96,132]]){rc(px-pw/2,pz-pd/2,px+pw/2,pz+pd/2,'#1f6f4c','#34d39988');const[cx,cy]=P(px,pz);x.fillStyle='#38bdf866';x.beginPath();x.ellipse(cx,cy,8,5,.3,0,T);x.fill();for(const[ox,oy]of[[-12,-8],[11,-7],[-9,9],[10,8]])cir(cx+ox,cy+oy,3.2,'#34d39977');}
+for(const bx of[-300,-180,-60,60,180])for(const bz of[-300,-180,-60,60,180,300]){const d=getDistrictAt(bx,bz);for(let k=0;k<9;k++){const o=-36+k%3*28,p=-36+Math.floor(k/3)*28;rc(bx+o,bz+p,bx+o+22,bz+p+22,k%3===0?d.color+'55':k%2?d.color+'36':'#e2e8f029');}}
+for(const[vx,vz]of[[612,-88],[670,-88],[612,88],[670,88],[640,-178],[640,178]])rc(vx-16,vz-13,vx+16,vz+13,'#2dd4bf66','#99f6e4');
+for(const ax of WORLD.avenuesX)ln(ax,-385,ax,385,'#94a3b8',4.2);for(const sz of WORLD.streetsZ)ln(-385,sz,256,sz,'#94a3b8',4.2);
+const[ix1,iy1]=P(556,-162),[ix2,iy2]=P(724,162);rr(ix1,iy1,ix2-ix1,iy2-iy1,16,0,'#94a3b8',4.2);
+ln(556,0,724,0,'#94a3b8',4);ln(254,0,560,0,'#ef4444',7);ln(254,0,560,0,'#fff',1.6,[6,4]);for(const px of[345,471])cir(...P(px,0),4.2,'#fff');
+ln(266,120,424,120,'#d97706',5.5);const[pX,pY]=P(408,120);cir(pX,pY,10,0,'#22d3ee',2.6);cir(pX,pY,6,0,'#ff5e78',1.4);
+const sg=getActiveStage(st.missions),[plx,ply]=P(st.player.x,st.player.z),[mx,my]=P(sg.x,sg.z);
+for(const[col,lw,ds]of[['#fbbf2459',9,[]],['#fde047',3.2,[7,4]]]){x.strokeStyle=col;x.lineWidth=lw;x.setLineDash(ds);x.beginPath();x.moveTo(plx,ply);x.lineTo(plx,my);x.lineTo(mx,my);x.stroke();}
+x.setLineDash([]);x.textAlign='center';x.textBaseline='middle';
+const bdg=(wx,wz,bg,ch,r=6.6)=>{const[bx,by]=P(wx,wz);cir(bx,by,r,bg,'#fff',1.4);x.fillStyle='#090d16';x.font='900 8.5px sans-serif';x.fillText(ch,bx,by+.5);};
+const kS={Race:['#22d3ee','R'],Stunt:['#fb923c','S'],Hideout:['#f43f5e','H'],Export:['#c084fc','E'],Property:['#34d399','P']};let eI=0;
+for(const a of SIDE_ACTIVITIES){const[c,ch]=kS[a.kind]||['#34d399','•'];bdg(a.x+(a.kind==='Export'?(eI++-1.5)*42:0),a.z,c,ch,6.4);}
+for(const p of SERVICE_POIS)bdg(p.x,p.z,p.color,p.type==='garage'?'G':p.type==='gunshop'?'A':'⌂',7.2);
+bdg(742,-185,'#fde047','L',6.5);bdg(sg.x,sg.z,'#fbbf24','★',9.4);cir(plx,ply,7.2,'#fff','#ff2b55',2.8);
+x.font='800 10.5px sans-serif';
+for(const d of DISTRICTS){const[lx,ly]=P((d.minX+d.maxX)/2,(d.minZ+d.maxZ)/2),t=d.name.toUpperCase(),tw=x.measureText(t).width+12;rr(lx-tw/2,ly-8.5,tw,17,4,'#070c18cc',d.color+'88');x.fillStyle='#f8fafc';x.fillText(t,lx,ly+.5);}
+}
 
-export function createMenuManager(menuRoot, actions) {
-  let activeTab = 'MAP';
-  let notice = '';
+function renderTitle(st){
+const cards=st.saveSystem.listSlots().map((s,i)=>`<div class="gc sl" data-load-slot="${i}">${D('s0',S('s1',`SAVE SLOT ${i+1}${i?'':' · ACTIVE'}`)+S('s2',s?$(s.cash):'EMPTY'))}${D('s3',s?`Mission ${s.missionIndex+1}/10 · ${s.missionTitle}`:'New Career')}${D('s4',SP(s?`${s.district} · ${s.completion}%`:'Coral Promenade')+SP(s?s.savedAt:'Begin'))}</div>`).join('');
+const nav=[['continue','CONTINUE CAMPAIGN','▶',' p'],['new_game','NEW GAME','→',''],['save','LOAD GAME','3 SLOTS',''],['set','SETTINGS','⚙',''],['map','CONTROLS & ATLAS','M','']].map(([a,l,r,c])=>B(`tb${c}`,`data-act="${a}"`,SP(l)+SP(r))).join('');
+const ctrls=[['WASD','Drive / Walk'],['SHIFT','Nitro / Sprint'],['SPACE','Drift / Jump'],['F','Steal / Exit Car'],['LMB','Shoot / Aim'],['1-8','8 Weapons'],['Q/E/C','Crew Favours'],['R','4 FM Radio'],['M / ESC','Tactical Atlas'],['F5 / F9','Quick Save/Load']].map(([k,l])=>SP(`<kbd>${k}</kbd>${l}`)).join('');
+root.innerHTML=D('ts',D('tm',D('tL',D('ew',LOGO)+'<p class="tg">Rule seven sun-soaked coastal districts from Coral Promenade to Starlight Isle. Steal 18 sculpted vehicles, outrun 5-star SBPD air &amp; tactical dispatch, and claim Solaria Bay.</p>'+D('tn',nav))+D('tR',D('sh','PERSISTENT CAREER SLOTS')+cards))+D('cs',ctrls));
+root.onclick=e=>{const b=e.target.closest('[data-act],[data-load-slot]');if(!b)return;if(b.dataset.loadSlot!==undefined)return act.loadSlot(Number(b.dataset.loadSlot));const a=b.dataset.act;if(a==='continue')act.continueGame();else if(a==='new_game')act.newGame();else{tab=a==='save'?'SAVE':a==='set'?'SETTINGS':'MAP';act.openAtlas();}};
+}
 
-  function drawAtlasVectorMap(canvas, state) {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // Shimmering turquoise-to-cobalt coastal water backdrop
-    const sea = ctx.createLinearGradient(0, 0, w, h);
-    sea.addColorStop(0, '#0b3866');
-    sea.addColorStop(0.55, '#0e6185');
-    sea.addColorStop(1, '#09436b');
-    ctx.fillStyle = sea;
-    ctx.fillRect(0, 0, w, h);
-
-    // Map world [-430..810] x [-430..430] into canvas
-    const toPx = (wx, wz) => [
-      ((wx + 430) / 1240) * w,
-      ((wz + 430) / 860) * h,
-    ];
-    const drawWorldRect = (x1, z1, x2, z2, fill, stroke = null) => {
-      const [px1, py1] = toPx(x1, z1);
-      const [px2, py2] = toPx(x2, z2);
-      ctx.fillStyle = fill;
-      ctx.fillRect(px1, py1, px2 - px1, py2 - py1);
-      if (stroke) {
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(px1, py1, px2 - px1, py2 - py1);
-      }
-    };
-
-    // Mainland + Golden Beach + Starlight Isle landmasses + shallow reef contour glow
-    drawWorldRect(318, -410, 354, 410, 'rgba(34, 211, 238, 0.16)');
-    drawWorldRect(496, -234, 784, 234, 'rgba(34, 211, 238, 0.16)');
-    drawWorldRect(-410, -410, 272, 410, '#182234');
-    drawWorldRect(272, -410, 324, 410, '#e9c47c');
-    drawWorldRect(512, -218, 768, 218, '#e9c47c');
-    drawWorldRect(524, -206, 756, 206, '#1a3833');
-
-    // Architectural block silhouettes across the city blocks for rich cartographic detail
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
-    for (const bx of [-300, -180, -60, 60, 180]) {
-      for (const bz of [-300, -180, -60, 60, 180, 300]) {
-        drawWorldRect(bx - 38, bz - 38, bx - 4, bz - 4, 'rgba(255,255,255,0.06)');
-        drawWorldRect(bx + 4, bz - 38, bx + 38, bz - 4, 'rgba(255,255,255,0.05)');
-        drawWorldRect(bx - 38, bz + 4, bx - 4, bz + 38, 'rgba(255,255,255,0.05)');
-        drawWorldRect(bx + 4, bz + 4, bx + 38, bz + 38, 'rgba(255,255,255,0.06)');
-      }
-    }
-
-    // 7 Colored District Zones
-    for (let i = 0; i < DISTRICTS.length; i += 1) {
-      const d = DISTRICTS[i];
-      drawWorldRect(d.minX, d.minZ, d.maxX, d.maxZ, `${d.color}22`, `${d.color}66`);
-    }
-
-    // Road grid + Solaria Arch Bridge + Sky-Ring Pier
-    ctx.strokeStyle = '#64748b';
-    ctx.lineWidth = 4;
-    for (const ax of WORLD.avenuesX) {
-      const [x1, y1] = toPx(ax, -380);
-      const [x2, y2] = toPx(ax, 380);
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    }
-    for (const sz of WORLD.streetsZ) {
-      const [x1, y1] = toPx(-380, sz);
-      const [x2, y2] = toPx(255, sz);
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    }
-    // Starlight Isle loop
-    const [i1x, i1y] = toPx(560, -160);
-    const [i2x, i2y] = toPx(720, 160);
-    ctx.strokeRect(i1x, i1y, i2x - i1x, i2y - i1y);
-
-    // Iconic Solaria Arch Bridge (red) & Wooden Sky-Ring Pier (amber)
-    const [b1x, b1y] = toPx(254, 0);
-    const [b2x, b2y] = toPx(560, 0);
-    ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 6.5;
-    ctx.beginPath(); ctx.moveTo(b1x, b1y); ctx.lineTo(b2x, b2y); ctx.stroke();
-
-    const [p1x, p1y] = toPx(266, 120);
-    const [p2x, p2y] = toPx(418, 120);
-    ctx.strokeStyle = '#d97706'; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(p1x, p1y); ctx.lineTo(p2x, p2y); ctx.stroke();
-    ctx.strokeStyle = '#22d3ee'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(p2x - 10, p2y, 9, 0, Math.PI * 2); ctx.stroke();
-
-    // Glowing GPS route polyline from player to mission objective
-    const st = getActiveStage(state.missions);
-    const [plx, ply] = toPx(state.player.x, state.player.z);
-    const [mx, my] = toPx(st.x, st.z);
-    ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3.2; ctx.setLineDash([7, 4]);
-    ctx.beginPath(); ctx.moveTo(plx, ply); ctx.lineTo(plx, my); ctx.lineTo(mx, my); ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Activity & Service POI Markers
-    for (const a of SIDE_ACTIVITIES) {
-      const [ax, ay] = toPx(a.x, a.z);
-      ctx.fillStyle = a.kind === 'Race' ? '#22d3ee' : a.kind === 'Stunt' ? '#f97316' : a.kind === 'Hideout' ? '#ef4444' : '#34d399';
-      ctx.beginPath(); ctx.arc(ax, ay, 3.6, 0, Math.PI * 2); ctx.fill();
-    }
-    for (const p of SERVICE_POIS) {
-      const [px, py] = toPx(p.x, p.z);
-      ctx.fillStyle = p.color;
-      ctx.fillRect(px - 4.5, py - 4.5, 9, 9);
-      ctx.strokeStyle = '#090d16'; ctx.lineWidth = 1.4; ctx.strokeRect(px - 4.5, py - 4.5, 9, 9);
-    }
-
-    // Active Mission Star & Player Position Indicator
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath(); ctx.arc(mx, my, 7.5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#090d16'; ctx.lineWidth = 2; ctx.stroke();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(plx, ply, 6.5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#ff5e78'; ctx.lineWidth = 2.4; ctx.stroke();
-
-    // Crisp District Labels
-    ctx.font = '800 11px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    for (const d of DISTRICTS) {
-      const [lx, ly] = toPx((d.minX + d.maxX) * 0.5, (d.minZ + d.maxZ) * 0.5);
-      ctx.fillStyle = 'rgba(7, 11, 20, 0.72)';
-      const tw = ctx.measureText(d.name.toUpperCase()).width + 12;
-      ctx.fillRect(lx - tw * 0.5, ly - 9, tw, 17);
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillText(d.name.toUpperCase(), lx, ly + 3);
-    }
-  }
-
-  function renderTitle(state) {
-    const slots = state.saveSystem.listSlots();
-    const slotCards = slots.map((s, idx) => `
-      <div class="glass-card slot-card" data-load-slot="${idx}">
-        <div class="slot-top"><span class="slot-id">SAVE SLOT ${idx + 1}${idx === 0 ? ' · ACTIVE' : ''}</span><span class="slot-cash">${s ? `$${s.cash.toLocaleString()}` : 'EMPTY'}</span></div>
-        <div class="slot-title">${s ? `Mission ${s.missionIndex + 1}/10 · ${s.missionTitle}` : 'Start New Criminal Empire'}</div>
-        <div class="slot-meta"><span>${s ? `${s.district} · ${s.completion}%` : 'Coral Promenade'}</span><span>${s ? s.savedAt : 'Click to begin'}</span></div>
-      </div>
-    `).join('');
-
-    menuRoot.innerHTML = `
-      <div class="title-screen">
-        <div class="title-main">
-          <div class="title-left">
-            <div class="emblem-wrap">${TITLE_EMBLEM_SVG}</div>
-            <p class="title-tagline">Rule seven sun-soaked coastal districts from Coral Promenade to Starlight Isle. Steal 18 sculpted vehicles, outrun 5-star SBPD air &amp; tactical dispatch, and claim Solaria Bay.</p>
-            <div class="title-nav">
-              <button class="title-btn primary" data-act="continue"><span>CONTINUE CAMPAIGN</span><span>▶</span></button>
-              <button class="title-btn" data-act="new_game"><span>NEW GAME</span><span>→</span></button>
-              <button class="title-btn" data-act="open_atlas_save"><span>LOAD GAME</span><span>3 SLOTS</span></button>
-              <button class="title-btn" data-act="open_atlas_settings"><span>SETTINGS</span><span>⚙</span></button>
-              <button class="title-btn" data-act="open_atlas_map"><span>CONTROLS &amp; ATLAS</span><span>M</span></button>
-            </div>
-          </div>
-          <div class="title-right">
-            <div class="slots-header">PERSISTENT CAREER SLOTS</div>
-            ${slotCards}
-          </div>
-        </div>
-        <div class="controls-strip">
-          <span class="ctrl-item"><kbd>WASD</kbd>Drive / Walk</span>
-          <span class="ctrl-item"><kbd>SHIFT</kbd>Nitro / Sprint</span>
-          <span class="ctrl-item"><kbd>SPACE</kbd>Drift / Jump</span>
-          <span class="ctrl-item"><kbd>F</kbd>Steal / Exit Car</span>
-          <span class="ctrl-item"><kbd>LMB</kbd>Shoot / Aim</span>
-          <span class="ctrl-item"><kbd>1-8</kbd>8 Weapons</span>
-          <span class="ctrl-item"><kbd>Q/E/C</kbd>Crew Favours</span>
-          <span class="ctrl-item"><kbd>R</kbd>4 FM Radio</span>
-          <span class="ctrl-item"><kbd>M / ESC</kbd>Tactical Atlas</span>
-          <span class="ctrl-item"><kbd>F5 / F9</kbd>Quick Save/Load</span>
-        </div>
-      </div>
-    `;
-
-    menuRoot.querySelector('[data-act="continue"]').onclick = () => actions.continueGame();
-    menuRoot.querySelector('[data-act="new_game"]').onclick = () => actions.newGame();
-    menuRoot.querySelector('[data-act="open_atlas_save"]').onclick = () => { activeTab = 'SAVE'; actions.openAtlas(); };
-    menuRoot.querySelector('[data-act="open_atlas_settings"]').onclick = () => { activeTab = 'SETTINGS'; actions.openAtlas(); };
-    menuRoot.querySelector('[data-act="open_atlas_map"]').onclick = () => { activeTab = 'MAP'; actions.openAtlas(); };
-    menuRoot.querySelectorAll('[data-load-slot]').forEach((el) => {
-      el.onclick = () => actions.loadSlot(Number(el.dataset.loadSlot));
-    });
-  }
-
-  function renderAtlas(state) {
-    const comp = computeCompletionPercent(state.missions, state.activities);
-    const rank = getRespectRank(state.player.respect);
-    const slots = state.saveSystem.listSlots();
-
-    const tabsHtml = ATLAS_TABS.map((t) => `<button class="atlas-tab ${activeTab === t ? 'active' : ''}" data-tab="${t}">${t}</button>`).join('');
-
-    let bodyHtml = '';
-    if (activeTab === 'MAP') {
-      const quickUpgrades = GARAGE_UPGRADES.slice(0, 4).map((u) => `
-        <button class="upgrade-btn" data-buy-upg="${u.id}"><span>${u.label}</span><span class="upgrade-cost">$${u.cost.toLocaleString()}</span></button>
-      `).join('');
-      const crewChips = CREW_ROSTER.map((c) => {
-        const cd = Math.ceil(state.crew.cooldowns[c.id] || 0);
-        return `<button class="upgrade-btn" data-trigger-fav="${c.id}"><span>[${c.key}] ${c.name} (${c.member.split(' ')[0]})</span><span class="upgrade-cost">${cd <= 0 ? 'READY' : `${cd}s`}</span></button>`;
-      }).join('');
-      const slotRows = slots.map((s, idx) => `
-        <div class="list-row" style="margin-top:4px;padding:5px 8px;">
-          <span><strong>Slot ${idx + 1}:</strong> ${s ? `M${s.missionIndex + 1} · $${s.cash.toLocaleString()} · ${s.district}` : 'Empty'}</span>
-          <span>
-            <button class="atlas-tab" style="padding:2px 7px;border:1px solid var(--border-soft)" data-save-slot="${idx}">SAVE</button>
-            <button class="atlas-tab" style="padding:2px 7px;border:1px solid var(--border-soft)" data-load-slot="${idx}">LOAD</button>
-          </span>
-        </div>
-      `).join('');
-
-      bodyHtml = `
-        <div class="glass-card atlas-map-panel">
-          <div class="atlas-map-head">
-            <span class="atlas-section-title">SOLARIA BAY · 7-DISTRICT + STARLIGHT ISLE TACTICAL ATLAS</span>
-            <div class="atlas-legend">
-              <span><i class="leg-dot" style="background:#fbbf24"></i>Mission / Garage</span>
-              <span><i class="leg-dot" style="background:#22d3ee"></i>Street Race</span>
-              <span><i class="leg-dot" style="background:#f97316"></i>Stunt Ramp</span>
-              <span><i class="leg-dot" style="background:#ef4444"></i>Hideout / Bridge</span>
-              <span><i class="leg-dot" style="background:#34d399"></i>Safehouse</span>
-            </div>
-          </div>
-          <div class="atlas-map-canvas-wrap"><canvas id="atlas-map-canvas" width="740" height="470"></canvas></div>
-        </div>
-        <div class="atlas-side">
-          <div class="glass-card atlas-card">
-            <div class="atlas-map-head"><span class="atlas-section-title">SOLARIA CUSTOMS &amp; ARMORY</span><span class="upgrade-cost">$${Math.round(state.player.cash).toLocaleString()}</span></div>
-            <div class="mini-grid">${quickUpgrades}</div>
-          </div>
-          <div class="glass-card atlas-card">
-            <div class="atlas-map-head"><span class="atlas-section-title">CREW FAVOURS · RANK ${rank.rank} (${rank.title})</span><span style="color:#fbbf24;font-size:11px;font-weight:800">${comp}% COMPLETE</span></div>
-            <div style="display:flex;flex-direction:column;gap:5px;margin-top:6px;">${crewChips}</div>
-          </div>
-          <div class="glass-card atlas-card">
-            <div class="atlas-map-head"><span class="atlas-section-title">CAREER SAVE SLOTS (LOCALSTORAGE)</span><span style="color:#94a3b8;font-size:10px">${notice || 'F5 Quick Save'}</span></div>
-            ${slotRows}
-          </div>
-        </div>
-      `;
-    } else if (activeTab === 'MISSIONS') {
-      const mRows = STORY_MISSIONS.map((m, i) => {
-        const done = state.missions.completedIds.includes(m.id);
-        const live = i === state.missions.missionIndex;
-        const badge = done ? '<span class="badge-done">COMPLETED</span>' : live ? '<span class="badge-live">ACTIVE</span>' : `<button class="atlas-tab" data-start-m="${i}">START</button>`;
-        return `<div class="list-row"><span><strong>${i + 1}. ${m.title}</strong> (${m.act} · $${m.rewardCash.toLocaleString()})</span>${badge}</div>`;
-      }).join('');
-      const aRows = SIDE_ACTIVITIES.slice(0, 12).map((a) => {
-        const done = state.activities.completedIds.includes(a.id);
-        return `<div class="list-row"><span><strong>[${a.kind}]</strong> ${a.name} · ${a.district}</span><span class="${done ? 'badge-done' : 'badge-lock'}">${done ? 'DONE' : `$${(a.payout || a.price).toLocaleString()}`}</span></div>`;
-      }).join('');
-      bodyHtml = `
-        <div class="glass-card atlas-full-panel">
-          <div><div class="atlas-section-title">STORY CAMPAIGN (10 MISSIONS)</div>${mRows}</div>
-          <div><div class="atlas-section-title">OPEN-WORLD ACTIVITIES (24 TOTAL)</div>${aRows}</div>
-        </div>`;
-    } else if (activeTab === 'GARAGE') {
-      const upgs = GARAGE_UPGRADES.map((u) => {
-        const t = state.activities.upgradeTiers[u.id] || 0;
-        const c = u.kind === 'tier' ? u.cost * (t + 1) : u.cost;
-        return `<button class="upgrade-btn" data-buy-upg="${u.id}"><span>${u.label}${u.kind === 'tier' ? ` (Tier ${t}/${u.max})` : ''}</span><span class="upgrade-cost">$${c.toLocaleString()}</span></button>`;
-      }).join('');
-      const props = SIDE_ACTIVITIES.filter((a) => a.kind === 'Property').map((p) => {
-        const owned = state.activities.ownedProperties.includes(p.id);
-        return `<button class="upgrade-btn" data-buy-prop="${p.id}"><span>${p.name} (+$${p.income}/cycle)</span><span class="upgrade-cost">${owned ? 'OWNED' : `$${p.price.toLocaleString()}`}</span></button>`;
-      }).join('');
-      bodyHtml = `
-        <div class="glass-card atlas-full-panel">
-          <div><div class="atlas-section-title">SOLARIA CUSTOMS GARAGE &amp; BRISA ARMORY</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${upgs}</div></div>
-          <div><div class="atlas-section-title">SAFEHOUSES &amp; PROPERTIES (${state.activities.ownedProperties.length}/4)</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${props}</div><p style="color:#fbbf24;font-size:12px;margin-top:12px">${notice}</p></div>
-        </div>`;
-    } else if (activeTab === 'CREW') {
-      const cards = CREW_ROSTER.map((c) => `
-        <div class="list-row" style="flex-direction:column;align-items:flex-start;gap:4px">
-          <div style="width:100%;display:flex;justify-content:space-between"><strong>${c.member} · ${c.role}</strong><button class="upgrade-btn" data-trigger-fav="${c.id}">[${c.key}] ${c.name}</button></div>
-          <span style="color:#94a3b8;font-size:11.5px">${c.desc}</span>
-        </div>`).join('');
-      bodyHtml = `
-        <div class="glass-card atlas-full-panel">
-          <div><div class="atlas-section-title">SYNDICATE CREW FAVOURS</div>${cards}</div>
-          <div><div class="atlas-section-title">RESPECT PROGRESSION</div>
-            <div class="list-row"><span>Current Rank</span><span class="badge-live">RANK ${rank.rank} · ${rank.title}</span></div>
-            <div class="list-row"><span>Total Respect</span><span>${state.player.respect} RP</span></div>
-            <div class="list-row"><span>Global Completion</span><span>${comp}%</span></div>
-            <div class="list-row"><span>Sunset Relics Found</span><span>${state.activities.relicsFound} / 12</span></div>
-          </div>
-        </div>`;
-    } else if (activeTab === 'STATS') {
-      const s = state.player.stats;
-      bodyHtml = `
-        <div class="glass-card atlas-full-panel">
-          <div><div class="atlas-section-title">CRIMINAL RECORD</div>
-            <div class="list-row"><span>Missions Completed</span><span>${state.missions.completedIds.length} / 10</span></div>
-            <div class="list-row"><span>Side Activities Completed</span><span>${state.activities.completedIds.length} / 24</span></div>
-            <div class="list-row"><span>Vehicles Hijacked</span><span>${s.carsHijacked}</span></div>
-            <div class="list-row"><span>Pursuits Evaded</span><span>${s.copsEvaded}</span></div>
-            <div class="list-row"><span>Hostiles Neutralized</span><span>${s.eliminations}</span></div>
-          </div>
-          <div><div class="atlas-section-title">EMPIRE METRICS</div>
-            <div class="list-row"><span>Cash On Hand</span><span class="badge-done">$${Math.round(state.player.cash).toLocaleString()}</span></div>
-            <div class="list-row"><span>Lifetime Earnings</span><span>$${Math.round(s.totalEarnings).toLocaleString()}</span></div>
-            <div class="list-row"><span>Distance Traveled</span><span>${s.distanceKm.toFixed(1)} km</span></div>
-            <div class="list-row"><span>Stunt Jumps Cleared</span><span>${s.stuntJumps} / 6</span></div>
-            <div class="list-row"><span>Owned Safehouses</span><span>${state.activities.ownedProperties.length} / 4</span></div>
-          </div>
-        </div>`;
-    } else if (activeTab === 'SETTINGS') {
-      bodyHtml = `
-        <div class="glass-card atlas-full-panel">
-          <div><div class="atlas-section-title">ATMOSPHERE &amp; AUDIO</div>
-            <div class="list-row"><span>Golden Hour Sunset (17:40)</span><button class="upgrade-btn" data-tod="17.65">APPLY</button></div>
-            <div class="list-row"><span>Neon Twilight Dusk (19:45)</span><button class="upgrade-btn" data-tod="19.75">APPLY</button></div>
-            <div class="list-row"><span>Coastal Noon (12:30)</span><button class="upgrade-btn" data-tod="12.5">APPLY</button></div>
-            <div class="list-row"><span>Audio / Radio Mute</span><button class="upgrade-btn" data-toggle-mute="1">${state.audio.state.muted ? 'UNMUTE' : 'MUTE'}</button></div>
-          </div>
-          <div><div class="atlas-section-title">SESSION ACTIONS</div>
-            <div class="list-row"><span>Return to Title Panorama</span><button class="upgrade-btn" data-to-title="1">TITLE SCREEN</button></div>
-          </div>
-        </div>`;
-    } else {
-      const slotPanels = slots.map((s, idx) => `
-        <div class="list-row">
-          <div><strong>Slot ${idx + 1}</strong> · ${s ? `Mission ${s.missionIndex + 1}/10 (${s.missionTitle}) · $${s.cash.toLocaleString()} · ${s.district}` : 'Empty Slot'}</div>
-          <div><button class="upgrade-btn" style="display:inline-flex;margin-right:6px" data-save-slot="${idx}">SAVE</button><button class="upgrade-btn" style="display:inline-flex" data-load-slot="${idx}">LOAD</button></div>
-        </div>`).join('');
-      bodyHtml = `<div class="glass-card atlas-full-panel" style="grid-template-columns:1fr"><div class="atlas-section-title">PERSISTENT 3-SLOT LOCALSTORAGE SAVES</div>${slotPanels}<p style="color:#fbbf24;font-size:12px">${notice}</p></div>`;
-    }
-
-    menuRoot.innerHTML = `
-      <div class="atlas-overlay">
-        <div class="glass-card atlas-topbar">
-          <div class="atlas-brand">SOLARIA BAY · TACTICAL ATLAS</div>
-          <div class="atlas-tabs">${tabsHtml}</div>
-          <button class="atlas-resume" data-resume="1">RESUME [ESC]</button>
-        </div>
-        <div class="kpi-strip">
-          <div class="glass-card kpi-box"><div class="kpi-num">10</div><div class="kpi-lbl">MISSIONS</div></div>
-          <div class="glass-card kpi-box"><div class="kpi-num">24</div><div class="kpi-lbl">ACTIVITIES</div></div>
-          <div class="glass-card kpi-box"><div class="kpi-num">${Object.keys(VEHICLES).length}</div><div class="kpi-lbl">VEHICLES</div></div>
-          <div class="glass-card kpi-box"><div class="kpi-num">${WEAPONS.length}</div><div class="kpi-lbl">WEAPONS</div></div>
-          <div class="glass-card kpi-box"><div class="kpi-num">${DISTRICTS.length}</div><div class="kpi-lbl">DISTRICTS</div></div>
-          <div class="glass-card kpi-box"><div class="kpi-num">4</div><div class="kpi-lbl">FM RADIO</div></div>
-          <div class="glass-card kpi-box"><div class="kpi-num" style="color:#34d399">${comp}%</div><div class="kpi-lbl">COMPLETION</div></div>
-        </div>
-        <div class="atlas-body">${bodyHtml}</div>
-      </div>
-    `;
-
-    const mapCanvas = menuRoot.querySelector('#atlas-map-canvas');
-    if (mapCanvas) drawAtlasVectorMap(mapCanvas, state);
-
-    menuRoot.querySelector('[data-resume]')?.addEventListener('click', () => actions.resumeGame());
-    menuRoot.querySelectorAll('[data-tab]').forEach((b) => {
-      b.onclick = () => { activeTab = b.dataset.tab; renderAtlas(state); };
-    });
-    menuRoot.querySelectorAll('[data-buy-upg]').forEach((b) => {
-      b.onclick = () => {
-        const res = applyGarageOrShopPurchase(b.dataset.buyUpg, state.activities, state.player, state.wanted, state.vehicles);
-        notice = res.msg;
-        renderAtlas(state);
-      };
-    });
-    menuRoot.querySelectorAll('[data-buy-prop]').forEach((b) => {
-      b.onclick = () => {
-        const res = buyProperty(b.dataset.buyProp, state.activities, state.player);
-        notice = res.msg;
-        renderAtlas(state);
-      };
-    });
-    menuRoot.querySelectorAll('[data-trigger-fav]').forEach((b) => {
-      b.onclick = () => {
-        triggerCrewFavour(b.dataset.triggerFav, state.crew, state.player, state.wanted, state.vehicles, state.missions, state.effects);
-        notice = state.crew.lastNotice || 'Favour cooling down';
-        renderAtlas(state);
-      };
-    });
-    menuRoot.querySelectorAll('[data-start-m]').forEach((b) => {
-      b.onclick = () => {
-        startMission(state.missions, Number(b.dataset.startM), 0, state.scene, state.vehicles, state.pedestrians, state.rng);
-        actions.resumeGame();
-      };
-    });
-    menuRoot.querySelectorAll('[data-save-slot]').forEach((b) => {
-      b.onclick = () => {
-        actions.saveSlot(Number(b.dataset.saveSlot));
-        notice = `Saved to Slot ${Number(b.dataset.saveSlot) + 1}!`;
-        renderAtlas(state);
-      };
-    });
-    menuRoot.querySelectorAll('[data-load-slot]').forEach((b) => {
-      b.onclick = () => actions.loadSlot(Number(b.dataset.loadSlot));
-    });
-    menuRoot.querySelectorAll('[data-tod]').forEach((b) => {
-      b.onclick = () => { actions.setTimeOfDay(Number(b.dataset.tod)); renderAtlas(state); };
-    });
-    menuRoot.querySelector('[data-toggle-mute]')?.addEventListener('click', () => {
-      state.audio.setMuted(!state.audio.state.muted);
-      renderAtlas(state);
-    });
-    menuRoot.querySelector('[data-to-title]')?.addEventListener('click', () => actions.showTitle());
-  }
-
-  return {
-    setActiveTab(t) { activeTab = t; },
-    renderTitle,
-    renderAtlas,
-  };
+function renderAtlas(st){
+const{missions:ms,activities:ac,player:pl,crew:cr,wanted:wn,vehicles:vh,audio:au}=st,comp=computeCompletionPercent(ms,ac),rk=getRespectRank(pl.respect),slots=st.saveSystem.listSlots();
+const hasM=id=>ms.completedIds.includes(id),hasA=id=>ac.completedIds.includes(id),hasP=id=>ac.ownedProperties.includes(id);
+const sB=i=>SP(B('m2',`data-s="${i}"`,'SAVE')+B('m2',`data-l="${i}"`,'LOAD')),mkL=a=>a.map(([k,v])=>lr(SP(k),SP(v))).join('');
+let body='';
+if(tab==='MAP'){
+const pills=STORY_MISSIONS.map((m,i)=>B(`pi ${hasM(m.id)?'done':i===ms.missionIndex?'live':''}`,`data-m="${i}" title="${m.title}"`,`M${i+1}`)).join('');
+const leg=[['#fbbf24','Mission/Garage'],['#22d3ee','Race'],['#fb923c','Stunt'],['#f43f5e','Hideout/Armory'],['#34d399','Safehouse']].map(([c,l])=>SP(`<i class="lg" style="background:${c}"></i>${l}`)).join('');
+const qU=GARAGE_UPGRADES.slice(0,4).map(u=>ub(`data-u="${u.id}"`,u.label,$(u.cost))).join('');
+const cC=CREW_ROSTER.map(c=>{const cd=Math.ceil(cr.cooldowns[c.id]||0);return ub(`data-f="${c.id}"`,`[${c.key}] ${c.name} (${c.member.split(' ')[0]})`,cd<=0?'READY':`${cd}s`);}).join('');
+const sR=slots.map((s,i)=>lr(SP(`<strong>Slot ${i+1}:</strong> ${s?`M${s.missionIndex+1} · ${$(s.cash)} · ${s.district}`:'Empty'}`),sB(i),'sm')).join('');
+body=D('gc mp',D('ah',S('at2','SOLARIA BAY · 7-DISTRICT + STARLIGHT ISLE ATLAS')+D('al',leg))+D('mw','<canvas id="atlas-map-canvas" width="760" height="424"></canvas>')+D('mb',S('ml','CAMPAIGN M1–M10')+D('mr',pills)))+D('ad',D('gc ac',D('ah',S('at2','SOLARIA CUSTOMS &amp; ARMORY')+S('uc',$(pl.cash)))+D('mg',qU))+D('gc ac cd',D('do',donut(comp)+D('dr2',`RANK ${rk.rank}<br><span>${rk.title}</span>`))+D('cw',D('at2','CREW FAVOURS')+cC))+D('gc ac',D('ah',S('at2','CAREER SAVE SLOTS (LOCALSTORAGE)')+S('mu',note||'F5 Quick Save'))+sR));
+}else if(tab==='MISSIONS'){
+body=pan('STORY CAMPAIGN (10)',STORY_MISSIONS.map((m,i)=>lr(SP(`<strong>${i+1}. ${m.title}</strong> (${m.act} · ${$(m.rewardCash)})`),hasM(m.id)?S('bd1','COMPLETED'):i===ms.missionIndex?S('bd2','ACTIVE'):B('m2',`data-m="${i}"`,'START'))).join(''),'ACTIVITIES (24)',SIDE_ACTIVITIES.slice(0,12).map(a=>{const d=hasA(a.id);return lr(SP(`<strong>[${a.kind}]</strong> ${a.name} · ${a.district}`),S(d?'bd1':'bd3',d?'DONE':$(a.payout||a.price)));}).join(''));
+}else if(tab==='GARAGE'){
+body=pan('CUSTOMS & ARMORY',D('sk',GARAGE_UPGRADES.map(u=>{const t=ac.upgradeTiers[u.id]||0;return ub(`data-u="${u.id}"`,`${u.label}${u.kind==='tier'?` (T${t}/${u.max})`:''}`,$(u.kind==='tier'?u.cost*(t+1):u.cost));}).join('')),`SAFEHOUSES (${ac.ownedProperties.length}/4)`,D('sk',SIDE_ACTIVITIES.filter(a=>a.kind==='Property').map(p=>ub(`data-p="${p.id}"`,`${p.name} (+${$(p.income)})`,hasP(p.id)?'OWNED':$(p.price))).join(''))+`<p class="nt">${note}</p>`);
+}else if(tab==='CREW'){
+body=pan('CREW FAVOURS',CREW_ROSTER.map(c=>lr(D('rw',`<strong>${c.member} · ${c.role}</strong>${B('ub',`data-f="${c.id}"`,`[${c.key}] ${c.name}`)}`),S('mu',c.desc),'cl')).join(''),'PROGRESSION',mkL([['Rank',S('bd2',`RANK ${rk.rank} · ${rk.title}`)],['Respect',`${pl.respect} RP`],['Completion',`${comp}%`],['Relics',`${ac.relicsFound}/12`]]));
+}else if(tab==='STATS'){
+const s=pl.stats;body=pan('CRIMINAL RECORD',mkL([['Missions',`${ms.completedIds.length}/10`],['Activities',`${ac.completedIds.length}/24`],['Hijacks',s.carsHijacked],['Evaded',s.copsEvaded],['Eliminations',s.eliminations]]),'EMPIRE METRICS',mkL([['Cash',$(pl.cash)],['Lifetime',$(s.totalEarnings)],['Distance',`${s.distanceKm.toFixed(1)} km`],['Stunts',`${s.stuntJumps}/6`],['Safehouses',`${ac.ownedProperties.length}/4`]]));
+}else if(tab==='SETTINGS'){
+body=pan('ATMOSPHERE & AUDIO',[['Golden Afternoon',16.55],['Daylight',13.8],['Twilight',19.25]].map(([l,v])=>lr(SP(l),B('ub',`data-o="${v}"`,'APPLY'))).join('')+lr(SP('Audio / Radio'),B('ub','data-x="1"',au.state.muted?'UNMUTE':'MUTE')),'SESSION',lr(SP('Title Panorama'),B('ub','data-q="1"','TITLE SCREEN')));
+}else body=`<div class="gc af" style="grid-template-columns:1fr">${D('at2','3-SLOT LOCALSTORAGE SAVES')}${slots.map((s,i)=>lr(`<div><strong>Slot ${i+1}</strong> · ${s?`M${s.missionIndex+1}/10 (${s.missionTitle}) · ${$(s.cash)} · ${s.district}`:'Empty'}</div>`,sB(i))).join('')}<p class="nt">${note}</p></div>`;
+const kpi=[['10','MISSIONS'],['24','ACTIVITIES'],[Object.keys(VEHICLES).length,'VEHICLES'],[WEAPONS.length,'WEAPONS'],[DISTRICTS.length,'DISTRICTS'],['4','FM RADIO'],[`${comp}%`,'COMPLETION','#34d399']].map(([n,l,c])=>D('gc kb',`<div class="kn"${c?` style="color:${c}"`:''}>${n}</div>${D('kl',l)}`)).join('');
+root.innerHTML=D('ao',D('gc at',D('ab','SOLARIA BAY · TACTICAL ATLAS')+D('as',TABS.map(t=>B(`tb2 ${tab===t?'active':''}`,`data-t="${t}"`,t)).join(''))+B('ar','data-r="1"','RESUME [ESC]'))+D('ks',kpi)+D('ay',body));
+const mc=root.querySelector('#atlas-map-canvas');if(mc)drawMap(mc,st);
+root.onclick=e=>{
+const b=e.target.closest('button');if(!b)return;const d=b.dataset;
+if(d.r)return act.resumeGame();if(d.q)return act.showTitle();
+if(d.t)tab=d.t;else if(d.u)note=applyGarageOrShopPurchase(d.u,ac,pl,wn,vh).msg;else if(d.p)note=buyProperty(d.p,ac,pl).msg;
+else if(d.f){triggerCrewFavour(d.f,cr,pl,wn,vh,ms,st.effects);note=cr.lastNotice||'Cooling down';}
+else if(d.m!==undefined){startMission(ms,Number(d.m),0,st.scene,vh,st.pedestrians,st.rng);return act.resumeGame();}
+else if(d.s!==undefined){act.saveSlot(Number(d.s));note=`Saved Slot ${Number(d.s)+1}!`;}
+else if(d.l!==undefined)return act.loadSlot(Number(d.l));else if(d.o)act.setTimeOfDay(Number(d.o));else if(d.x)au.setMuted(!au.state.muted);else return;
+renderAtlas(st);
+};
+}
+return{setActiveTab(t){tab=t;},renderTitle,renderAtlas};
 }

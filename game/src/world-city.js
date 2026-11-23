@@ -1,763 +1,152 @@
-// 7-District Solaria Bay 3D open-world city builder: roads, Art Deco Coral Promenade hotels,
-// Solaria Downtown towers, Mirage Strip nightlife, Palma Vista, Little Brisa, Cobre Docks,
-// Starlight Isle, iconic Solaria Arch Bridge, Sky-Ring Pier, curved palms, ramps, and collisions.
+// 7-District Solaria Bay 3D open-world city: sunlit tarmac, Art Deco hotels, Bridge, Pier & palms.
+import*as THREE from'three';
+import{AVENUE_NAMES,DISTRICTS,SERVICE_POIS,STREET_NAMES,WORLD}from'./config.js';
+import{SHARED_POOL_TEX}from'./effects-particles.js';
+import{hash2D,randRange}from'./random.js';
 
-import * as THREE from 'three';
-import { AVENUE_NAMES, DISTRICTS, SERVICE_POIS, STREET_NAMES, WORLD } from './config.js';
-import { hash2D, randRange } from './random.js';
+const{Group:Grp,Mesh,BoxGeometry:Box,CylinderGeometry:Cyl,PlaneGeometry:Plane,SphereGeometry:Sph,ConeGeometry:Cone,TorusGeometry:Tor,MeshStandardMaterial:Std,MeshBasicMaterial:Bas,Vector3:V3,DoubleSide:DBL,AdditiveBlending:ADD}=THREE;
+const{sin,cos,abs,min,max,hypot,atan2,PI:P}=Math,H=P/2;
+const{bridgeStartX:b0,bridgeEndX:b1,bridgeZ:bZ,bridgePeakY:bH,pierStartX:p0,pierEndX:p1,pierZ:pZ,beachStartX:s0,shorelineX:s1,isleMinX:i0,isleMaxX:i1,isleMinZ:iz0,isleMaxZ:iz1,avenuesX:avX,streetsZ:stZ,roadWidth:rW}=WORLD;
 
-export function getDistrictAt(x, z) {
-  for (let i = 0; i < DISTRICTS.length; i += 1) {
-    const d = DISTRICTS[i];
-    if (x >= d.minX && x <= d.maxX && z >= d.minZ && z <= d.maxZ) return d;
-  }
-  return x > 320 ? DISTRICTS[6] : DISTRICTS[0];
+export const getDistrictAt=(x,z)=>DISTRICTS.find(d=>x>=d.minX&&x<=d.maxX&&z>=d.minZ&&z<=d.maxZ)||(x>320?DISTRICTS[6]:DISTRICTS[0]);
+export function getStreetAt(x,z){
+if(x>=b0&&x<=b1&&abs(z-bZ)<16)return'Solaria Arch Bridge';
+if(x>=p0&&x<=p1&&abs(z-pZ)<14)return'Starlight Sky-Ring Pier';
+const nr=(a,v)=>a.reduce((b,c)=>abs(v-c)<abs(v-b)?c:b,a[0]),ax=nr([...avX,560,720],x),sz=nr(stZ,z);
+return abs(x-ax)<24?AVENUE_NAMES[ax]||'Solaria Blvd':abs(z-sz)<24?STREET_NAMES[sz]||'Bay Crossway':x>=s0&&x<=s1?'Coral Gold Beach':AVENUE_NAMES[ax]||'Solaria Promenade';
+}
+export const getBridgeElevation=x=>x<b0||x>b1?0:sin((x-b0)/(b1-b0)*P)*bH;
+export const isWaterAt=(x,z)=>!((x>=b0-6&&x<=b1+6&&abs(z-bZ)<12)||(x>=p0-4&&x<=p1+4&&abs(z-pZ)<11)||(x>=i0&&x<=i1&&z>=iz0&&z<=iz1)||(x>=-410&&x<=s1&&z>=-410&&z<=410));
+
+export function getGroundHeightAt(x,z,ramps=[]){
+if(x>=b0&&x<=b1&&abs(z-bZ)<12)return getBridgeElevation(x);
+if(x>=p0&&x<=p1&&abs(z-pZ)<10.5)return 3.1;
+for(const r of ramps){const dx=x-r.x,dz=z-r.z,ca=cos(-r.yaw),sa=sin(-r.yaw),lz=dx*sa+dz*ca;if(abs(dx*ca-dz*sa)<r.w*.55&&lz>-r.l/2&&lz<r.l/2)return max(0,(lz+r.l/2)/r.l*r.h);}
+return x>s0&&x<=s1&&abs(z)<=410?THREE.MathUtils.lerp(.22,-.35,(x-s0)/(s1-s0)):isWaterAt(x,z)?-.35:0;
+}
+export function resolveBuildingCollision(w,x,z,r){
+let rx=x,rz=z,hit=false;
+for(const b of w.colliders){
+const dx=rx-max(b.minX,min(rx,b.maxX)),dz=rz-max(b.minZ,min(rz,b.maxZ)),d2=dx*dx+dz*dz;
+if(d2<r*r){hit=true;if(d2>1e-4){const d=Math.sqrt(d2),p=r-d;rx+=dx/d*p;rz+=dz/d*p;}else{const l=abs(rx-b.minX),ri=abs(b.maxX-rx),t=abs(rz-b.minZ),bt=abs(b.maxZ-rz),m=min(l,ri,t,bt);if(m===l)rx=b.minX-r;else if(m===ri)rx=b.maxX+r;else if(m===t)rz=b.minZ-r;else rz=b.maxZ+r;}}
+}
+return{x:rx,z:rz,hit};
 }
 
-export function getStreetAt(x, z) {
-  if (x >= WORLD.bridgeStartX && x <= WORLD.bridgeEndX && Math.abs(z - WORLD.bridgeZ) < 16) {
-    return 'Solaria Arch Bridge';
-  }
-  if (x >= WORLD.pierStartX && x <= WORLD.pierEndX && Math.abs(z - WORLD.pierZ) < 14) {
-    return 'Starlight Sky-Ring Pier';
-  }
-  let bestAx = WORLD.avenuesX[0];
-  let bestAd = Infinity;
-  const allAv = [...WORLD.avenuesX, 560, 720];
-  for (let i = 0; i < allAv.length; i += 1) {
-    const d = Math.abs(x - allAv[i]);
-    if (d < bestAd) { bestAd = d; bestAx = allAv[i]; }
-  }
-  let bestSz = WORLD.streetsZ[0];
-  let bestSd = Infinity;
-  for (let i = 0; i < WORLD.streetsZ.length; i += 1) {
-    const d = Math.abs(z - WORLD.streetsZ[i]);
-    if (d < bestSd) { bestSd = d; bestSz = WORLD.streetsZ[i]; }
-  }
-  if (bestAd < 24) return AVENUE_NAMES[String(bestAx)] || 'Solaria Blvd';
-  if (bestSd < 24) return STREET_NAMES[String(bestSz)] || 'Bay Crossway';
-  if (x >= WORLD.beachStartX && x <= WORLD.shorelineX) return 'Coral Gold Beach';
-  return AVENUE_NAMES[String(bestAx)] || 'Solaria Promenade';
+const mk=(p,g,m,x,y,z,s=false)=>{const o=new Mesh(g,m);o.position.set(x,y,z);o.castShadow=s;o.receiveShadow=true;p.add(o);return o;};
+const box=(p,w,h,d,m,x,y,z,s=true)=>mk(p,new Box(w,h,d),m,x,y,z,s);
+const cyl=(p,a,b,h,sg,m,x,y,z,s=false)=>mk(p,new Cyl(a,b,h,sg),m,x,y,z,s);
+const sph=(p,r,sg,m,x,y,z)=>mk(p,new Sph(r,sg,sg),m,x,y,z);
+const con=(p,r,h,sg,m,x,y,z,s=false)=>mk(p,new Cone(r,h,sg),m,x,y,z,s);
+const pln=(p,w,h,m,x,y,z)=>{const o=mk(p,new Plane(w,h),m,x,y,z);o.rotation.x=-H;return o;};
+const std=(c,r=.7,mt=0,ex={})=>new Std({color:c,roughness:r,metalness:mt,...ex});
+const mp=(map,r=.55,ex={})=>new Std({map,roughness:r,...ex});
+const bas=c=>new Bas({color:c});
+
+function mkPalm(x,z,sc,ry,tM,fM){
+const g=new Grp();g.position.set(x,0,z);g.rotation.y=ry;let px=0,py=0,hS=2.05*sc;
+for(let i=0;i<6;i++){const t=.07+i*.045;cyl(g,(.29-i*.032)*sc,(.32-i*.032)*sc,hS+.12,7,tM,px+sin(t)*hS/2,py+hS/2,0,true).rotation.z=-t;px+=sin(t)*hS+.04*sc;py+=cos(t)*hS;}
+const cr=new Grp();cr.position.set(px,py,0);
+for(let f=0;f<8;f++){const fr=new Grp();fr.rotation.y=f/8*P*2;box(fr,.95*sc,.09*sc,2.75*sc,fM,0,.3*sc,1.3*sc).rotation.x=.24;box(fr,.72*sc,.08*sc,2.35*sc,fM,0,-.35*sc,3.35*sc).rotation.x=.68;cr.add(fr);}
+g.add(cr);return g;
 }
 
-export function getBridgeElevation(x) {
-  if (x < WORLD.bridgeStartX || x > WORLD.bridgeEndX) return 0;
-  const u = (x - WORLD.bridgeStartX) / (WORLD.bridgeEndX - WORLD.bridgeStartX);
-  return Math.sin(u * Math.PI) * WORLD.bridgePeakY;
+function buildBridge(g,tx){
+const sp=b1-b0,rM=std('#dc2638',.3,.48),wM=std('#f8fafc',.32,.3),cM=std('#d8e0eb'),lM=bas('#fef08a'),dT=tx.road.clone();
+dT.needsUpdate=true;dT.rotation=H;dT.center.set(.5,.5);
+const dM=mp(dT,.72),cbM=std('#fff',.25,.6,{emissive:'#cbd5e1',emissiveIntensity:.25}),up=new V3(0,1,0);
+for(let i=0;i<28;i++){
+const x0=b0+i/28*sp,x1=b0+(i+1)/28*sp,y0=getBridgeElevation(x0),y1=getBridgeElevation(x1),len=hypot(x1-x0,y1-y0)+.25,seg=new Grp();
+seg.position.set((x0+x1)/2,(y0+y1)/2,bZ);seg.rotation.z=atan2(y1-y0,x1-x0);box(seg,len,1.3,21.6,cM,0,-.7,0);pln(seg,len,19.6,dM,0,.02,0);
+for(const s of[-10.3,10.3]){box(seg,len,1.15,.65,wM,0,.6,s,false);box(seg,len,.35,.72,rM,0,1.25,s,false);}
+if(i%4===2)for(const s of[-1,1]){cyl(seg,.14,.18,6.2,6,wM,0,3.1,s*10.2);sph(seg,.45,8,lM,0,6.2,s*9.6);}
+g.add(seg);
+}
+for(const px of[345,471]){
+const py=getBridgeElevation(px);box(g,8,py+10,26,cM,px,(py-10)/2,bZ);
+for(const s of[-1,1])cyl(g,1.15,2,68,8,rM,px,32,bZ+s*8.2,true).rotation.x=s*.11;
+[[3.2,3.2,19.5,wM,py+12],[3,2.8,13.5,wM,42],[3.6,3.6,8.2,rM,64]].forEach(([a,b,c,m,y])=>box(g,a,b,c,m,px,y,bZ));
+sph(g,1.1,10,bas('#ff4d6d'),px,67.2,bZ);
+for(let c=1;c<=7;c++)for(const dir of[-1,1]){const ax=px+dir*c*11.5;if(ax>=b0+8&&ax<=b1-8)for(const s of[-1,1]){const pA=new V3(px,63-c*3.1,bZ+s*3),pB=new V3(ax,getBridgeElevation(ax)+1,bZ+s*10.1),df=pB.clone().sub(pA);cyl(g,.14,.14,df.length(),5,cbM,(pA.x+pB.x)/2,(pA.y+pB.y)/2,(pA.z+pB.z)/2).quaternion.setFromUnitVectors(up,df.normalize());}}
+}
 }
 
-export function isWaterAt(x, z) {
-  if (x >= WORLD.bridgeStartX - 6 && x <= WORLD.bridgeEndX + 6 && Math.abs(z - WORLD.bridgeZ) < 12) return false;
-  if (x >= WORLD.pierStartX - 4 && x <= WORLD.pierEndX + 4 && Math.abs(z - WORLD.pierZ) < 11) return false;
-  const onIsle = x >= WORLD.isleMinX && x <= WORLD.isleMaxX && z >= WORLD.isleMinZ && z <= WORLD.isleMaxZ;
-  if (onIsle) return false;
-  const onMainland = x >= -410 && x <= WORLD.shorelineX && z >= -410 && z <= 410;
-  return !onMainland;
+function buildPier(g,tx){
+const len=p1-p0,mid=(p0+p1)/2,pM=std('#6b4b30',.88),rM=std('#f8fafc',.45),lM=std('#f1f5f9',.35,.4);
+box(g,len,.85,19,mp(tx.wood,.78),mid,2.7,pZ);for(const s of[-9.2,9.2])box(g,len,.9,.4,rM,mid,3.6,pZ+s,false);
+for(let x=p0+8;x<=p1-4;x+=16)for(const s of[-8.2,0,8.2])cyl(g,.45,.5,6.5,7,pM,x,-.4,pZ+s);
+for(const s of[-8.5,8.5])box(g,1.2,8.5,1.2,rM,p0+6,7.2,pZ+s);
+box(g,1.4,3.4,18.2,new Bas({map:tx.signs.skyRingPier}),p0+6,11.4,pZ,false);
+const wx=384,r=24,wp=new Grp();wp.position.set(wx,31,pZ);
+for(const s of[-1,1])for(const f of[-1,1])cyl(g,.55,.95,32,8,lM,wx+f*5.6,17,pZ+s*4.4,true).rotation.z=f*.24;
+cyl(wp,2.3,2.3,7.4,16,bas('#fde047'),0,0,0).rotation.x=H;
+wp.add(new Mesh(new Tor(r,.72,10,48),bas('#22d3ee')),new Mesh(new Tor(r-2.8,.46,8,42),bas('#ff5e78')));
+const cols=['#ff5e78','#22d3ee','#fbbf24','#a78bfa','#34d399','#fb923c'],spM=std('#fff',.4,0,{emissive:'#38bdf8',emissiveIntensity:.35}),pods=[];
+for(let i=0;i<16;i++){const a=i/16*P*2;cyl(wp,.16,.16,r*2,5,spM,0,0,0).rotation.z=a;pods.push(box(wp,2.6,2.5,3.2,std(cols[i%6],.3,0,{emissive:cols[i%6],emissiveIntensity:.5}),cos(a)*r,sin(a)*r,0,false));}
+g.add(wp);return{wheelPivot:wp,pods};
 }
 
-export function getGroundHeightAt(x, z, ramps = []) {
-  if (x >= WORLD.bridgeStartX && x <= WORLD.bridgeEndX && Math.abs(z - WORLD.bridgeZ) < 12) {
-    return getBridgeElevation(x);
-  }
-  if (x >= WORLD.pierStartX && x <= WORLD.pierEndX && Math.abs(z - WORLD.pierZ) < 10.5) {
-    return 3.1;
-  }
-  for (let i = 0; i < ramps.length; i += 1) {
-    const r = ramps[i];
-    const dx = x - r.x;
-    const dz = z - r.z;
-    const ca = Math.cos(-r.yaw);
-    const sa = Math.sin(-r.yaw);
-    const lx = dx * ca - dz * sa;
-    const lz = dx * sa + dz * ca;
-    if (Math.abs(lx) < r.w * 0.55 && lz > -r.l * 0.5 && lz < r.l * 0.5) {
-      const frac = (lz + r.l * 0.5) / r.l;
-      return Math.max(0, frac * r.h);
-    }
-  }
-  if (x > WORLD.beachStartX && x <= WORLD.shorelineX && Math.abs(z) <= 410) {
-    const t = (x - WORLD.beachStartX) / (WORLD.shorelineX - WORLD.beachStartX);
-    return THREE.MathUtils.lerp(0.22, -0.35, t);
-  }
-  if (isWaterAt(x, z)) return -0.35;
-  return 0;
+export function buildSolariaWorld(sc,tx,rng){
+const g=new Grp();sc.add(g);
+const colliders=[],lamps=[],beacons=[],ramps=[],neonBands=[],twilightLights=[];
+const addC=(x,z,hw,hd,h)=>colliders.push({minX:x-hw,maxX:x+hw,minZ:z-hd,maxZ:z+hd,h});
+const baseM=std('#e4dac8',.86),curbM=std('#d7dfe9',.78),sandM=mp(tx.sand,.88);tx.sidewalk.repeat.set(34,34);
+[[680,1.4,820,mp(tx.sidewalk,.82),-72,-.58],[62,1.4,820,sandM,299,-.62],[254,1.5,434,sandM,640,-.45],[224,1.2,396,std('#45b874',.85),640,-.22]].forEach(([w,h,d,m,x,y])=>box(g,w,h,d,m,x,y,0,false));
+
+const mkRM=(map,rx,ry,rot=0)=>{const m=map.clone();m.needsUpdate=true;m.repeat.set(rx,ry);if(rot){m.rotation=rot;m.center.set(.5,.5);}return mp(m,.72,{color:'#dde3ed',metalness:.04,emissive:'#1e2433',emissiveIntensity:.14});};
+const roadMatNS=mkRM(tx.road,1,28),roadMatEW=mkRM(tx.road,1,24,H),interMat=mkRM(tx.intersection,1,1),iRM=std('#505868',.78);
+for(const ax of avX){pln(g,rW,790,roadMatNS,ax,.14,0);if(ax===240||ax===0)for(const s of[-13.4,13.4])box(g,.8,.24,790,curbM,ax+s,.18,0,false);}
+for(const sz of stZ)pln(g,660,rW,roadMatEW,-60,.15,sz);
+for(const ax of avX)for(const sz of stZ)pln(g,rW+1.5,rW+1.5,interMat,ax,.17,sz);
+for(const ix of[560,720])pln(g,18,340,iRM,ix,.42,0);for(const iz of[-160,0,160])pln(g,178,18,iRM,640,.43,iz);
+
+const M={coral:mp(tx.coralDeco,.5),cream:mp(tx.creamDeco,.52),mint:mp(tx.mintDeco,.5),peach:mp(tx.peachDeco,.52),mirage:mp(tx.mirageDeco,.4,{emissive:'#472870',emissiveIntensity:.45}),gA:mp(tx.glassCobalt,.22,{metalness:.42}),gB:mp(tx.glassAmber,.25,{metalness:.38}),brisa:mp(tx.brisaTerracotta,.6),wh:mp(tx.warehouse,.74),terra:std('#cc5c42',.72),awC:mp(tx.awningCoral,.65),awT:mp(tx.awningTeal,.65),heli:mp(tx.helipad,.68),tG:bas('#fbbf24'),tC:bas('#22d3ee'),tP:bas('#ff5e78'),shop:bas('#ffedc2')};
+const DM=[(b,z,s)=>[M.cream,M.coral,M.mint,M.peach][(b+z+s)%4],(b,z,s)=>s%2?M.gB:M.gA,(b,z,s)=>s%2?M.coral:M.mirage,(b,z,s)=>s%2?M.peach:M.cream,(b,z,s)=>s%2?M.peach:M.brisa];
+
+[-300,-180,-60,60,180].forEach((cx,bx)=>[-300,-180,-60,60,180,300].forEach((cz,bz)=>{
+const d=getDistrictAt(cx,cz),di=DISTRICTS.indexOf(d);box(g,86,.32,86,baseM,cx,.16,cz,false);
+[[-20,-20],[20,-20],[-20,20],[20,20]].forEach(([sx,sz],s)=>{
+const px=cx+sx,pz=cz+sz,bw=28+hash2D(bx*7+s,bz*11+s,42)*8,bd=28+hash2D(bx+s,bz*5,99)*8,bh=d.hMin+hash2D(bx*13,bz*3+s,77)*(d.hMax-d.hMin),wm=(DM[di]||(()=>M.wh))(bx,bz,s);
+box(g,bw,bh,bd,wm,px,bh/2+.3,pz);addC(px,pz,bw/2+.6,bd/2+.6,bh);
+if(di===1){if(bh>65){box(g,bw*.68,8,bd*.68,wm,px,bh+4.3,pz);neonBands.push(box(g,bw*.72,1,bd*.72,s%2?M.tG:M.tC,px,bh+8.6,pz,false));}else pln(g,bw*.72,bd*.72,M.heli,px,bh+.36,pz);}
+else if(di===0){box(g,bw*.76,4.2,bd*.76,M.cream,px,bh+2.4,pz);neonBands.push(box(g,bw+.5,.85,bd+.5,s%2?M.tC:M.tP,px,bh+.3,pz,false));if(px>190){box(g,3.4,.9,bd*.84,s%2?M.awT:M.awC,px+bw/2+1.5,4.6,pz,false).rotation.z=-.35;for(const w of[-1,0,1])box(g,.35,2.7,5.2,M.shop,px+bw/2+.14,1.9,pz+w*7.5,false);}}
+else if(di===2){const nm=[M.tP,M.tC,M.tG][s%3];neonBands.push(box(g,bw+.6,1.1,bd+.6,nm,px,bh-1.2,pz,false),box(g,bw+.6,.75,bd+.6,nm,px,5.6,pz,false));for(const w of[-1,0,1])box(g,5.4,2.8,.45,M.shop,px+w*7.6,2,pz+bd/2+.15,false);}
+else if(di===3||di===4)con(g,max(bw,bd)*.66,6.5,4,M.terra,px,bh+3.5,pz).rotation.y=P/4;
+else if(di===5)box(g,10,3.2,4.2,std(['#dc2626','#1d4ed8','#d97706','#0d9488'][(bx+s)%4],.72),px,bh+1.9,pz,false);
+});
+}));
+
+const sn=tx.signs;
+[[sn.hotelSolaria,16,3.8,217,13.5,-124,H],[sn.cafeBrisa,14,3.4,217,11.2,-84,H],[sn.hotelSolaria,16,3.8,217,15.5,-36,H],[sn.hotelSolaria,16,3.8,217,18,78,H],[sn.bancoSolaria,20,4.8,23,46,-42,-H],[sn.mirageLounge,16,3.8,-23,13,-212,H],[sn.solariaCustoms,16,3.8,23,12,-212,-H],[sn.mirageLounge,18,4.2,0,17,-264,0]].forEach(([t,w,h,x,y,z,ry])=>{box(g,w,h,.8,new Bas({map:t}),x,y,z,false).rotation.y=ry;});
+[[612,-88],[670,-88],[612,88],[670,88],[640,-182],[640,182]].forEach(([vx,vz],i)=>{const vh=13+i%3*5;box(g,26,vh,24,i%2?M.coral:M.cream,vx,vh/2+.4,vz);box(g,28,1.2,26,M.terra,vx,vh+.8,vz,false);addC(vx,vz,13.5,12.5,vh);});
+cyl(g,2.6,4.2,34,12,M.cream,742,17,-185,true);cyl(g,3.1,3.5,9,12,std('#e11d48'),742,20,-185);sph(g,2.2,12,bas('#fef08a'),742,35.5,-185);
+
+buildBridge(g,tx);const skyRing=buildPier(g,tx),trM=std('#875c38',.88),frM=std('#2cb35e',.6,0,{side:DBL}),palms=[];
+for(let z=-330;z<=330;z+=30)if(abs(z)>=20&&abs(z-120)>=20)palms.push([257.5,z,1.15],[222.5,z+14,1.06]);
+for(let z=-340;z<=-140;z+=42)palms.push([-17,z,.96],[17,z,.96]);
+for(let z=-140;z<=140;z+=48)palms.push([542,z,1.1],[738,z,1.1]);
+for(const[px,pz,s]of palms)g.add(mkPalm(px,pz,s*randRange(rng,.88,1.14),randRange(rng,0,P*2),trM,frM));
+
+const uCols=['#ff5e78','#22d3ee','#fbbf24','#a78bfa','#34d399','#fb923c'],poleM=std('#f8fafc',.4);
+for(let z=-220;z<=220;z+=20)if(abs(z)>=22&&abs(z-120)>=24)for(const[ox,oz]of[[276+abs(z)%3*5,z],[297+abs(z)%2*6,z+8]]){cyl(g,.1,.1,3.2,6,poleM,ox,1.5,oz);con(g,2.5,1,8,std(uCols[abs(z+ox)%6],.55),ox,3.1,oz,true);}
+for(const lz of[-122,-46,62]){box(g,4.4,3.4,4.4,M.cream,294,4.8,lz);box(g,5.2,.9,5.2,std('#ef4444'),294,6.8,lz,false);for(const sx of[-1.8,1.8])for(const sz of[-1.8,1.8])box(g,.35,3.6,.35,poleM,294+sx,1.6,lz+sz,false);}
+const lpM=std('#293548',.4,.6),bM=bas('#ffebb0'),poolMat=new Bas({map:SHARED_POOL_TEX,color:'#ffd588',transparent:true,opacity:.12,depthWrite:false,blending:ADD});
+for(const ax of[0,120,240,-120])for(let z=-310;z<=310;z+=56)if(abs(z%120)>=20)for(const s of[-1,1]){const lx=ax+s*14.8;cyl(g,.14,.2,8.2,6,lpM,lx,4.1,z);sph(g,.55,8,bM,lx-s*1.4,8.1,z);lamps.push(pln(g,18,18,poolMat,lx-s*4.2,.21,z));}
+for(const[x,y,z,col]of[[6,9,-186,'#ffd28a'],[-7,9,-206,'#ffbd75'],[2,10,-226,'#c4b5fd']]){const pt=new THREE.PointLight(col,0,56,1.5);pt.position.set(x,y,z);sc.add(pt);twilightLights.push(pt);}
+const rS=bas('#ef4444'),gS=bas('#22c55e');
+for(const ix of[0,120,240])for(const iz of[-240,-120,0,120]){const gx=ix-14.5,gz=iz-14.5;box(g,.35,7.2,.35,lpM,gx,3.6,gz,false);box(g,6.2,.32,.32,lpM,gx+3,7,gz,false);box(g,.55,1.4,.55,(ix+iz)%240===0?gS:rS,gx+4.8,6.5,gz,false);}
+const rampM=std('#f97316',.45,0,{emissive:'#9a3412',emissiveIntensity:.35});
+for(const[id,x,z,yaw,w,l,h]of[['ramp_coral',252,-245,0,6.5,14,3.4],['ramp_pier',278,120,H,6.5,13,3.2],['ramp_mirage',0,-290,0,6.5,14,3.5],['ramp_docks',-120,290,H,7,15,3.8],['ramp_downtown',120,60,0,6.5,14,3.4],['ramp_isle',560,-70,0,6.5,14,3.4]]){
+const rg=new Grp();rg.position.set(x,.15,z);rg.rotation.y=yaw;box(rg,w,.5,hypot(l,h),rampM,0,h/2,0).rotation.x=-atan2(h,l);box(rg,w+.2,.22,.7,M.tC,0,h+.1,l*.48,false);g.add(rg);ramps.push({id,x,z,yaw,w,l,h});
+}
+for(const p of SERVICE_POIS){const ring=mk(g,new Tor(3.8,.22,8,28),new Bas({color:p.color,transparent:true,opacity:.85}),p.x,.45,p.z);ring.rotation.x=H;beacons.push({mesh:ring,poi:p});}
+return{group:g,colliders,skyRing,lamps,neonBands,beacons,ramps,poolMat,roadMatNS,roadMatEW,interMat,twilightLights};
 }
 
-export function resolveBuildingCollision(world, x, z, radius) {
-  let rx = x;
-  let rz = z;
-  let hit = false;
-  const list = world.colliders;
-  for (let i = 0; i < list.length; i += 1) {
-    const b = list[i];
-    const cx = Math.max(b.minX, Math.min(rx, b.maxX));
-    const cz = Math.max(b.minZ, Math.min(rz, b.maxZ));
-    const dx = rx - cx;
-    const dz = rz - cz;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < radius * radius) {
-      hit = true;
-      if (d2 > 0.0001) {
-        const d = Math.sqrt(d2);
-        const push = radius - d;
-        rx += (dx / d) * push;
-        rz += (dz / d) * push;
-      } else {
-        const penL = Math.abs(rx - b.minX);
-        const penR = Math.abs(b.maxX - rx);
-        const penT = Math.abs(rz - b.minZ);
-        const penB = Math.abs(b.maxZ - rz);
-        const m = Math.min(penL, penR, penT, penB);
-        if (m === penL) rx = b.minX - radius;
-        else if (m === penR) rx = b.maxX + radius;
-        else if (m === penT) rz = b.minZ - radius;
-        else rz = b.maxZ + radius;
-      }
-    }
-  }
-  return { x: rx, z: rz, hit };
-}
-
-function addBox(parent, w, h, d, mat, x, y, z, shadow = true) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z);
-  m.castShadow = shadow;
-  m.receiveShadow = true;
-  parent.add(m);
-  return m;
-}
-
-function createCurvedPalmTree(x, z, scale, rotY, trunkMat, frondMat) {
-  const g = new THREE.Group();
-  g.position.set(x, 0, z);
-  g.rotation.y = rotY;
-
-  const segs = 6;
-  let px = 0;
-  let py = 0;
-  const hStep = 2.05 * scale;
-  const lean = 0.28 * scale;
-  for (let i = 0; i < segs; i += 1) {
-    const rBot = (0.32 - i * 0.032) * scale;
-    const rTop = (0.29 - i * 0.032) * scale;
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, hStep + 0.12, 7), trunkMat);
-    const tilt = 0.07 + i * 0.045;
-    cyl.position.set(px + Math.sin(tilt) * hStep * 0.5, py + hStep * 0.5, 0);
-    cyl.rotation.z = -tilt;
-    cyl.castShadow = true;
-    cyl.receiveShadow = true;
-    g.add(cyl);
-    px += Math.sin(tilt) * hStep + lean * 0.14;
-    py += Math.cos(tilt) * hStep;
-  }
-
-  // Crown cluster of 8 arched layered fronds
-  const crown = new THREE.Group();
-  crown.position.set(px, py, 0);
-  for (let f = 0; f < 8; f += 1) {
-    const ang = (f / 8) * Math.PI * 2;
-    const frond = new THREE.Group();
-    frond.rotation.y = ang;
-    const blade1 = new THREE.Mesh(new THREE.BoxGeometry(0.95 * scale, 0.09 * scale, 2.7 * scale), frondMat);
-    blade1.position.set(0, 0.3 * scale, 1.3 * scale);
-    blade1.rotation.x = 0.24;
-    blade1.castShadow = true;
-    const blade2 = new THREE.Mesh(new THREE.BoxGeometry(0.72 * scale, 0.08 * scale, 2.3 * scale), frondMat);
-    blade2.position.set(0, -0.35 * scale, 3.35 * scale);
-    blade2.rotation.x = 0.68;
-    blade2.castShadow = true;
-    frond.add(blade1, blade2);
-    crown.add(frond);
-  }
-  g.add(crown);
-  return g;
-}
-
-function buildSolariaArchBridge(group, textures) {
-  const startX = WORLD.bridgeStartX;
-  const endX = WORLD.bridgeEndX;
-  const span = endX - startX;
-  const segs = 28;
-  const redMat = new THREE.MeshStandardMaterial({ color: '#d92638', roughness: 0.34, metalness: 0.52 });
-  const whiteMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.36, metalness: 0.35 });
-  const deckRoadTex = textures.road.clone();
-  deckRoadTex.needsUpdate = true;
-  deckRoadTex.rotation = Math.PI / 2;
-  deckRoadTex.center.set(0.5, 0.5);
-  deckRoadTex.repeat.set(1, 1);
-  const deckMat = new THREE.MeshStandardMaterial({ map: deckRoadTex, roughness: 0.8 });
-  const concreteMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', roughness: 0.72 });
-  const cableMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', emissive: '#94a3b8', emissiveIntensity: 0.25, roughness: 0.25, metalness: 0.6 });
-  const lampGlow = new THREE.MeshBasicMaterial({ color: '#fde68a' });
-
-  for (let i = 0; i < segs; i += 1) {
-    const x0 = startX + (i / segs) * span;
-    const x1 = startX + ((i + 1) / segs) * span;
-    const y0 = getBridgeElevation(x0);
-    const y1 = getBridgeElevation(x1);
-    const dx = x1 - x0;
-    const dy = y1 - y0;
-    const len = Math.hypot(dx, dy) + 0.25;
-    const slope = Math.atan2(dy, dx);
-
-    const seg = new THREE.Group();
-    seg.position.set((x0 + x1) * 0.5, (y0 + y1) * 0.5, WORLD.bridgeZ);
-    seg.rotation.z = slope;
-
-    addBox(seg, len, 1.3, 21.6, concreteMat, 0, -0.7, 0, true);
-    const top = new THREE.Mesh(new THREE.PlaneGeometry(len, 19.6), deckMat);
-    top.rotation.x = -Math.PI / 2;
-    top.position.y = 0.02;
-    top.receiveShadow = true;
-    seg.add(top);
-
-    addBox(seg, len, 1.15, 0.65, whiteMat, 0, 0.6, -10.3, false);
-    addBox(seg, len, 1.15, 0.65, whiteMat, 0, 0.6, 10.3, false);
-    addBox(seg, len, 0.35, 0.72, redMat, 0, 1.25, -10.3, false);
-    addBox(seg, len, 0.35, 0.72, redMat, 0, 1.25, 10.3, false);
-
-    if (i % 4 === 2) {
-      for (const side of [-1, 1]) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 6.2, 6), whiteMat);
-        pole.position.set(0, 3.1, side * 10.2);
-        seg.add(pole);
-        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), lampGlow);
-        bulb.position.set(0, 6.2, side * 9.6);
-        seg.add(bulb);
-      }
-    }
-    group.add(seg);
-  }
-
-  // Twin iconic red-and-white cable-stayed A-frame pylons + fan cables
-  const pylonXs = [345, 471];
-  for (let p = 0; p < pylonXs.length; p += 1) {
-    const px = pylonXs[p];
-    const py = getBridgeElevation(px);
-    const towerTopY = 68;
-
-    // Support pier down into bay water
-    addBox(group, 8, py + 10, 26, concreteMat, px, (py - 10) * 0.5, WORLD.bridgeZ, true);
-
-    for (const side of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 2.0, towerTopY, 8), redMat);
-      leg.position.set(px, towerTopY * 0.5 - 2, WORLD.bridgeZ + side * 8.2);
-      leg.rotation.x = side * 0.11;
-      leg.castShadow = true;
-      group.add(leg);
-    }
-    // White cross-beams & red crown arch
-    addBox(group, 3.2, 3.2, 19.5, whiteMat, px, py + 12, WORLD.bridgeZ, true);
-    addBox(group, 3.0, 2.8, 13.5, whiteMat, px, 42, WORLD.bridgeZ, true);
-    addBox(group, 3.6, 3.6, 8.2, redMat, px, 64, WORLD.bridgeZ, true);
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 10), new THREE.MeshBasicMaterial({ color: '#ff4d6d' }));
-    beacon.position.set(px, 67.2, WORLD.bridgeZ);
-    group.add(beacon);
-
-    // Fan of gleaming white stay cables
-    for (let c = 1; c <= 7; c += 1) {
-      const dx = c * 11.5;
-      for (const dir of [-1, 1]) {
-        const ax = px + dir * dx;
-        if (ax < startX + 8 || ax > endX - 8) continue;
-        const ay = getBridgeElevation(ax) + 1.0;
-        const topY = 63 - c * 3.1;
-        for (const side of [-1, 1]) {
-          const pA = new THREE.Vector3(px, topY, WORLD.bridgeZ + side * 3.0);
-          const pB = new THREE.Vector3(ax, ay, WORLD.bridgeZ + side * 10.1);
-          const diff = new THREE.Vector3().subVectors(pB, pA);
-          const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, diff.length(), 5), cableMat);
-          cable.position.copy(pA).add(pB).multiplyScalar(0.5);
-          cable.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), diff.clone().normalize());
-          group.add(cable);
-        }
-      }
-    }
-  }
-}
-
-function buildSkyRingPier(group, textures) {
-  const pierLen = WORLD.pierEndX - WORLD.pierStartX;
-  const pierMidX = (WORLD.pierStartX + WORLD.pierEndX) * 0.5;
-  const woodMat = new THREE.MeshStandardMaterial({ map: textures.wood, roughness: 0.82 });
-  const pilingMat = new THREE.MeshStandardMaterial({ color: '#5c4028', roughness: 0.9 });
-  const railMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.5 });
-
-  // Wooden pier deck & timber pilings
-  addBox(group, pierLen, 0.85, 19, woodMat, pierMidX, 2.7, WORLD.pierZ, true);
-  addBox(group, pierLen, 0.9, 0.4, railMat, pierMidX, 3.6, WORLD.pierZ - 9.2, false);
-  addBox(group, pierLen, 0.9, 0.4, railMat, pierMidX, 3.6, WORLD.pierZ + 9.2, false);
-
-  for (let x = WORLD.pierStartX + 8; x <= WORLD.pierEndX - 4; x += 16) {
-    for (const side of [-8.2, 0, 8.2]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 6.5, 7), pilingMat);
-      post.position.set(x, -0.4, WORLD.pierZ + side);
-      group.add(post);
-    }
-  }
-
-  // Entrance glowing archway sign: SKY-RING PIER
-  const signMat = new THREE.MeshBasicMaterial({ map: textures.signs.skyRingPier });
-  addBox(group, 1.2, 8.5, 1.2, railMat, WORLD.pierStartX + 6, 7.2, WORLD.pierZ - 8.5, true);
-  addBox(group, 1.2, 8.5, 1.2, railMat, WORLD.pierStartX + 6, 7.2, WORLD.pierZ + 8.5, true);
-  addBox(group, 1.4, 3.4, 18.2, signMat, WORLD.pierStartX + 6, 11.4, WORLD.pierZ, false);
-
-  // Giant glowing Sky-Ring Observation Wheel
-  const wx = 384;
-  const wy = 28;
-  const wz = WORLD.pierZ;
-  const legMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.35, metalness: 0.45 });
-  for (const s of [-1, 1]) {
-    for (const f of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.95, 29, 8), legMat);
-      leg.position.set(wx + f * 5.2, 15.5, wz + s * 4.4);
-      leg.rotation.z = f * 0.24;
-      leg.castShadow = true;
-      group.add(leg);
-    }
-  }
-
-  const wheelPivot = new THREE.Group();
-  wheelPivot.position.set(wx, wy, wz);
-  const radius = 21.5;
-  const rimOuter = new THREE.Mesh(
-    new THREE.TorusGeometry(radius, 0.65, 10, 48),
-    new THREE.MeshBasicMaterial({ color: '#22d3ee' }),
-  );
-  const rimInner = new THREE.Mesh(
-    new THREE.TorusGeometry(radius - 2.6, 0.42, 8, 42),
-    new THREE.MeshBasicMaterial({ color: '#ff5e78' }),
-  );
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.2, 2.2, 7.2, 16),
-    new THREE.MeshBasicMaterial({ color: '#fde047' }),
-  );
-  hub.rotation.x = Math.PI / 2;
-  wheelPivot.add(rimOuter, rimInner, hub);
-
-  const podColors = ['#ff5e78', '#22d3ee', '#fbbf24', '#a78bfa', '#34d399', '#fb923c'];
-  const spokeMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', emissive: '#38bdf8', emissiveIntensity: 0.35 });
-  const pods = [];
-  for (let i = 0; i < 16; i += 1) {
-    const a = (i / 16) * Math.PI * 2;
-    const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, radius * 2, 5), spokeMat);
-    spoke.rotation.z = a;
-    wheelPivot.add(spoke);
-
-    const pod = new THREE.Mesh(
-      new THREE.BoxGeometry(2.5, 2.4, 3.2),
-      new THREE.MeshStandardMaterial({
-        color: podColors[i % podColors.length],
-        emissive: podColors[i % podColors.length],
-        emissiveIntensity: 0.55,
-        roughness: 0.2,
-      }),
-    );
-    pod.position.set(Math.cos(a) * radius, Math.sin(a) * radius, 0);
-    wheelPivot.add(pod);
-    pods.push(pod);
-  }
-  group.add(wheelPivot);
-  return { wheelPivot, pods };
-}
-
-export function buildSolariaWorld(scene, textures, rng) {
-  const group = new THREE.Group();
-  scene.add(group);
-  const colliders = [];
-  const lamps = [];
-  const beacons = [];
-  const ramps = [];
-
-  // 1. Mainland urban ground slab & Starlight Isle terrain
-  const baseMat = new THREE.MeshStandardMaterial({ color: '#d8ceb8', roughness: 0.9 });
-  const sidewalkMat = new THREE.MeshStandardMaterial({ map: textures.sidewalk, roughness: 0.85 });
-  textures.sidewalk.repeat.set(34, 34);
-  const mainGround = new THREE.Mesh(new THREE.BoxGeometry(680, 1.4, 820), sidewalkMat);
-  mainGround.position.set(-72, -0.58, 0);
-  mainGround.receiveShadow = true;
-  group.add(mainGround);
-
-  // Golden beach sand box cleanly meeting the boardwalk edge at x=268 and descending smoothly to ocean
-  const sandMat = new THREE.MeshStandardMaterial({ map: textures.sand, roughness: 0.92 });
-  const beachMesh = new THREE.Mesh(new THREE.BoxGeometry(62, 1.4, 820), sandMat);
-  beachMesh.position.set(299, -0.62, 0);
-  beachMesh.receiveShadow = true;
-  group.add(beachMesh);
-
-  // Starlight Isle lush coastal plateau + perimeter golden beach
-  const isleBeach = new THREE.Mesh(new THREE.BoxGeometry(254, 1.5, 434), sandMat);
-  isleBeach.position.set(640, -0.45, 0);
-  isleBeach.receiveShadow = true;
-  group.add(isleBeach);
-  const isleGrass = new THREE.Mesh(
-    new THREE.BoxGeometry(224, 1.2, 396),
-    new THREE.MeshStandardMaterial({ color: '#3ea86b', roughness: 0.88 }),
-  );
-  isleGrass.position.set(640, -0.22, 0);
-  isleGrass.receiveShadow = true;
-  group.add(isleGrass);
-
-  // 2. Crisp Asphalt Avenues, Cross-Streets & Zebra Intersections
-  const roadMatNS = new THREE.MeshStandardMaterial({ map: textures.road.clone(), roughness: 0.56, metalness: 0.08 });
-  roadMatNS.map.needsUpdate = true;
-  roadMatNS.map.repeat.set(1, 28);
-
-  const roadMatEW = new THREE.MeshStandardMaterial({ map: textures.road.clone(), roughness: 0.56, metalness: 0.08 });
-  roadMatEW.map.needsUpdate = true;
-  roadMatEW.map.rotation = Math.PI / 2;
-  roadMatEW.map.center.set(0.5, 0.5);
-  roadMatEW.map.repeat.set(1, 24);
-
-  const interMat = new THREE.MeshStandardMaterial({ map: textures.intersection, roughness: 0.56, metalness: 0.08 });
-
-  for (let i = 0; i < WORLD.avenuesX.length; i += 1) {
-    const ax = WORLD.avenuesX[i];
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.roadWidth, 790), roadMatNS);
-    strip.rotation.x = -Math.PI / 2;
-    strip.position.set(ax, 0.14, 0);
-    strip.receiveShadow = true;
-    group.add(strip);
-  }
-  for (let j = 0; j < WORLD.streetsZ.length; j += 1) {
-    const sz = WORLD.streetsZ[j];
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(660, WORLD.roadWidth), roadMatEW);
-    strip.rotation.x = -Math.PI / 2;
-    strip.position.set(-60, 0.15, sz);
-    strip.receiveShadow = true;
-    group.add(strip);
-  }
-  for (let i = 0; i < WORLD.avenuesX.length; i += 1) {
-    for (let j = 0; j < WORLD.streetsZ.length; j += 1) {
-      const inter = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.roadWidth + 1.5, WORLD.roadWidth + 1.5), interMat);
-      inter.rotation.x = -Math.PI / 2;
-      inter.position.set(WORLD.avenuesX[i], 0.17, WORLD.streetsZ[j]);
-      inter.receiveShadow = true;
-      group.add(inter);
-    }
-  }
-
-  // Starlight Isle paved road loop
-  const isleRoadMat = new THREE.MeshStandardMaterial({ color: '#2b313d', roughness: 0.82 });
-  for (const ix of [560, 720]) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(18, 340), isleRoadMat);
-    m.rotation.x = -Math.PI / 2; m.position.set(ix, 0.42, 0); m.receiveShadow = true; group.add(m);
-  }
-  for (const iz of [-160, 0, 160]) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(178, 18), isleRoadMat);
-    m.rotation.x = -Math.PI / 2; m.position.set(640, 0.43, iz); m.receiveShadow = true; group.add(m);
-  }
-
-  // 3. District Buildings (Art Deco Hotels, Glass Towers, Mirage Strip, Docks, Villas)
-  const mats = {
-    coral: new THREE.MeshStandardMaterial({ map: textures.coralDeco, roughness: 0.55 }),
-    cream: new THREE.MeshStandardMaterial({ map: textures.creamDeco, roughness: 0.58 }),
-    mint: new THREE.MeshStandardMaterial({ map: textures.mintDeco, roughness: 0.55 }),
-    peach: new THREE.MeshStandardMaterial({ map: textures.peachDeco, roughness: 0.56 }),
-    mirage: new THREE.MeshStandardMaterial({ map: textures.mirageDeco, roughness: 0.42, emissive: '#381c59', emissiveIntensity: 0.35 }),
-    glassA: new THREE.MeshStandardMaterial({ map: textures.glassCobalt, roughness: 0.24, metalness: 0.45 }),
-    glassB: new THREE.MeshStandardMaterial({ map: textures.glassAmber, roughness: 0.28, metalness: 0.4 }),
-    brisa: new THREE.MeshStandardMaterial({ map: textures.brisaTerracotta, roughness: 0.65 }),
-    warehouse: new THREE.MeshStandardMaterial({ map: textures.warehouse, roughness: 0.78 }),
-    roof: new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.85 }),
-    terracotta: new THREE.MeshStandardMaterial({ color: '#c2543a', roughness: 0.75 }),
-    awningCoral: new THREE.MeshStandardMaterial({ map: textures.awningCoral, roughness: 0.7 }),
-    awningTeal: new THREE.MeshStandardMaterial({ map: textures.awningTeal, roughness: 0.7 }),
-    helipad: new THREE.MeshStandardMaterial({ map: textures.helipad, roughness: 0.7 }),
-    trimGold: new THREE.MeshBasicMaterial({ color: '#fbbf24' }),
-    trimCyan: new THREE.MeshBasicMaterial({ color: '#22d3ee' }),
-    trimPink: new THREE.MeshBasicMaterial({ color: '#ff5e78' }),
-    glowShop: new THREE.MeshBasicMaterial({ color: '#ffe6b3' }),
-  };
-
-  const blocksX = [-300, -180, -60, 60, 180];
-  const blocksZ = [-300, -180, -60, 60, 180, 300];
-  const neonBands = [];
-
-  for (let bx = 0; bx < blocksX.length; bx += 1) {
-    for (let bz = 0; bz < blocksZ.length; bz += 1) {
-      const cx = blocksX[bx];
-      const cz = blocksZ[bz];
-      const dist = getDistrictAt(cx, cz);
-
-      // Raised sidewalk block curb plinth
-      addBox(group, 86, 0.32, 86, baseMat, cx, 0.16, cz, false);
-
-      // Place 2x2 articulated buildings per city block
-      const slots = [[-20, -20], [20, -20], [-20, 20], [20, 20]];
-      for (let s = 0; s < slots.length; s += 1) {
-        const px = cx + slots[s][0];
-        const pz = cz + slots[s][1];
-        const r = hash2D(bx * 7 + s, bz * 11 + s, 42);
-        const bw = 28 + r * 8;
-        const bd = 28 + hash2D(bx + s, bz * 5, 99) * 8;
-        const bh = dist.hMin + hash2D(bx * 13, bz * 3 + s, 77) * (dist.hMax - dist.hMin);
-
-        let wallMat = mats.cream;
-        if (dist.id === 'coral_promenade') {
-          wallMat = [mats.coral, mats.cream, mats.mint, mats.peach][(bx + bz + s) % 4];
-        } else if (dist.id === 'solaria_downtown') {
-          wallMat = s % 2 === 0 ? mats.glassA : mats.glassB;
-        } else if (dist.id === 'mirage_strip') {
-          wallMat = s % 2 === 0 ? mats.mirage : mats.coral;
-        } else if (dist.id === 'palma_vista') {
-          wallMat = s % 2 === 0 ? mats.cream : mats.peach;
-        } else if (dist.id === 'little_brisa') {
-          wallMat = s % 2 === 0 ? mats.brisa : mats.peach;
-        } else if (dist.id === 'cobre_docks') {
-          wallMat = mats.warehouse;
-        }
-
-        addBox(group, bw, bh, bd, wallMat, px, bh * 0.5 + 0.3, pz, true);
-        colliders.push({
-          minX: px - bw * 0.5 - 0.6, maxX: px + bw * 0.5 + 0.6,
-          minZ: pz - bd * 0.5 - 0.6, maxZ: pz + bd * 0.5 + 0.6,
-          h: bh,
-        });
-
-        // Architectural silhouettes: Art Deco crowns, helipads, awnings, terracotta roofs, neon trims
-        if (dist.id === 'solaria_downtown') {
-          if (bh > 65) {
-            addBox(group, bw * 0.68, 8, bd * 0.68, wallMat, px, bh + 4.3, pz, true);
-            const band = addBox(group, bw * 0.72, 1.0, bd * 0.72, s % 2 === 0 ? mats.trimCyan : mats.trimGold, px, bh + 8.6, pz, false);
-            neonBands.push(band);
-          } else {
-            const pad = new THREE.Mesh(new THREE.PlaneGeometry(bw * 0.72, bd * 0.72), mats.helipad);
-            pad.rotation.x = -Math.PI / 2;
-            pad.position.set(px, bh + 0.36, pz);
-            group.add(pad);
-          }
-        } else if (dist.id === 'coral_promenade') {
-          // Stepped pastel Art Deco crown + striped shop awning + framed illuminated boutique windows
-          addBox(group, bw * 0.75, 4.2, bd * 0.75, mats.cream, px, bh + 2.4, pz, true);
-          const trim = addBox(group, bw + 0.5, 0.85, bd + 0.5, s % 2 === 0 ? mats.trimPink : mats.trimCyan, px, bh + 0.3, pz, false);
-          neonBands.push(trim);
-          if (px > 190) {
-            const awn = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.9, bd * 0.82), s % 2 === 0 ? mats.awningCoral : mats.awningTeal);
-            awn.position.set(px + bw * 0.5 + 1.4, 4.6, pz);
-            awn.rotation.z = -0.35;
-            group.add(awn);
-            for (let w = -1; w <= 1; w += 1) {
-              addBox(group, 0.35, 2.7, 5.2, mats.glowShop, px + bw * 0.5 + 0.14, 1.9, pz + w * 7.5, false);
-            }
-          }
-        } else if (dist.id === 'mirage_strip') {
-          const neonMat = [mats.trimPink, mats.trimCyan, mats.trimGold][s % 3];
-          neonBands.push(addBox(group, bw + 0.6, 1.1, bd + 0.6, neonMat, px, bh - 1.2, pz, false));
-          neonBands.push(addBox(group, bw + 0.6, 0.75, bd + 0.6, neonMat, px, 5.6, pz, false));
-          // Multi-pane warm lit boutique storefront windows on street level
-          for (let w = -1; w <= 1; w += 1) {
-            addBox(group, 5.4, 2.8, 0.45, mats.glowShop, px + w * 7.6, 2.0, pz + bd * 0.5 + 0.15, false);
-          }
-        } else if (dist.id === 'palma_vista' || dist.id === 'little_brisa') {
-          const cap = new THREE.Mesh(new THREE.ConeGeometry(Math.max(bw, bd) * 0.66, 6.5, 4), mats.terracotta);
-          cap.position.set(px, bh + 3.5, pz);
-          cap.rotation.y = Math.PI / 4;
-          group.add(cap);
-        } else if (dist.id === 'cobre_docks') {
-          // Stacked colorful shipping containers beside freight buildings
-          const cCols = ['#dc2626', '#1d4ed8', '#d97706', '#0d9488'];
-          const cMat = new THREE.MeshStandardMaterial({ color: cCols[(bx + s) % 4], roughness: 0.75 });
-          addBox(group, 10, 3.2, 4.2, cMat, px, bh + 1.9, pz, false);
-        }
-      }
-    }
-  }
-
-  // Signature Original Landmarks & Glowing Signage!
-  const placeSign = (tex, w, h, x, y, z, rotY) => {
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.8), new THREE.MeshBasicMaterial({ map: tex }));
-    sign.position.set(x, y, z);
-    sign.rotation.y = rotY;
-    group.add(sign);
-  };
-  // Facing Ocean Palm Blvd (east +X) on Coral Promenade hotels:
-  placeSign(textures.signs.hotelSolaria, 16, 3.8, 217, 13.5, -36, Math.PI / 2);
-  placeSign(textures.signs.cafeBrisa, 14, 3.4, 217, 11, -158, Math.PI / 2);
-  placeSign(textures.signs.hotelSolaria, 16, 3.8, 217, 18, 78, Math.PI / 2);
-  // Facing Solaria Grand Ave (Downtown / Mirage Strip):
-  placeSign(textures.signs.bancoSolaria, 20, 4.8, 23, 46, -42, -Math.PI / 2);
-  placeSign(textures.signs.mirageLounge, 16, 3.8, -23, 13, -212, Math.PI / 2);
-  placeSign(textures.signs.solariaCustoms, 16, 3.8, 23, 12, -212, -Math.PI / 2);
-  placeSign(textures.signs.mirageLounge, 18, 4.2, 0, 17, -264, 0);
-
-  // Starlight Isle luxury villas + Lighthouse
-  const villaCoords = [[612, -88], [670, -88], [612, 88], [670, 88], [640, -182], [640, 182]];
-  for (let i = 0; i < villaCoords.length; i += 1) {
-    const [vx, vz] = villaCoords[i];
-    const vh = 13 + (i % 3) * 5;
-    addBox(group, 26, vh, 24, i % 2 === 0 ? mats.cream : mats.coral, vx, vh * 0.5 + 0.4, vz, true);
-    addBox(group, 28, 1.2, 26, mats.terracotta, vx, vh + 0.8, vz, false);
-    colliders.push({ minX: vx - 13.5, maxX: vx + 13.5, minZ: vz - 12.5, maxZ: vz + 12.5, h: vh });
-  }
-  // Starlight Lighthouse
-  const lhBase = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 4.2, 34, 12), mats.cream);
-  lhBase.position.set(742, 17, -185);
-  lhBase.castShadow = true;
-  const lhStripe = new THREE.Mesh(new THREE.CylinderGeometry(3.1, 3.5, 9, 12), new THREE.MeshStandardMaterial({ color: '#e11d48' }));
-  lhStripe.position.set(742, 20, -185);
-  const lhLamp = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 12), new THREE.MeshBasicMaterial({ color: '#fef08a' }));
-  lhLamp.position.set(742, 35.5, -185);
-  group.add(lhBase, lhStripe, lhLamp);
-
-  // 4. Iconic Solaria Arch Bridge & Starlight Sky-Ring Pier
-  buildSolariaArchBridge(group, textures);
-  const skyRing = buildSkyRingPier(group, textures);
-
-  // 5. Lush Curved 3D Palm Trees along Coral Promenade, Mirage Strip, Beach & Starlight Isle
-  const trunkMat = new THREE.MeshStandardMaterial({ color: '#7c5534', roughness: 0.9 });
-  const frondMat = new THREE.MeshStandardMaterial({ color: '#2ea85a', roughness: 0.65, side: THREE.DoubleSide });
-  const palmSpots = [];
-  for (let z = -340; z <= 340; z += 34) {
-    if (Math.abs(z) < 20 || Math.abs(z - 120) < 20) continue;
-    palmSpots.push([258, z, 1.15]);
-    palmSpots.push([222, z + 12, 1.05]);
-  }
-  for (let z = -340; z <= -140; z += 44) {
-    palmSpots.push([-17, z, 0.95], [17, z, 0.95]);
-  }
-  for (let z = -140; z <= 140; z += 48) {
-    palmSpots.push([542, z, 1.1], [738, z, 1.1]);
-  }
-  for (let i = 0; i < palmSpots.length; i += 1) {
-    const [px, pz, sc] = palmSpots[i];
-    const rot = randRange(rng, 0, Math.PI * 2);
-    group.add(createCurvedPalmTree(px, pz, sc * randRange(rng, 0.88, 1.16), rot, trunkMat, frondMat));
-  }
-
-  // 6. Beach Umbrellas & Lifeguard Towers on Coral Gold Beach
-  const umbCols = ['#ff5e78', '#22d3ee', '#fbbf24', '#a78bfa', '#34d399'];
-  const poleMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.4 });
-  for (let z = -220; z <= 220; z += 36) {
-    if (Math.abs(z) < 22 || Math.abs(z - 120) < 24) continue;
-    const ux = 282 + (Math.abs(z) % 3) * 7;
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.2, 6), poleMat);
-    pole.position.set(ux, 1.5, z);
-    const canopy = new THREE.Mesh(
-      new THREE.ConeGeometry(2.6, 1.0, 8),
-      new THREE.MeshStandardMaterial({ color: umbCols[Math.abs(z) % umbCols.length], roughness: 0.6 }),
-    );
-    canopy.position.set(ux, 3.1, z);
-    canopy.castShadow = true;
-    group.add(pole, canopy);
-  }
-  // Lifeguard Towers
-  for (const lz of [-76, 62]) {
-    addBox(group, 4.4, 3.4, 4.4, mats.cream, 294, 4.8, lz, true);
-    addBox(group, 5.2, 0.9, 5.2, new THREE.MeshStandardMaterial({ color: '#ef4444' }), 294, 6.8, lz, false);
-    for (const sx of [-1.8, 1.8]) {
-      for (const sz of [-1.8, 1.8]) {
-        addBox(group, 0.35, 3.6, 0.35, poleMat, 294 + sx, 1.6, lz + sz, false);
-      }
-    }
-  }
-
-  // 7. Streetlamps with Warm Glowing Globes & Ground Light Pools + Traffic Lights
-  const lampPoleMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.4, metalness: 0.6 });
-  const bulbMat = new THREE.MeshBasicMaterial({ color: '#ffe5a3' });
-  const poolMat = new THREE.MeshBasicMaterial({ color: '#ffcf7d', transparent: true, opacity: 0.16, depthWrite: false });
-  const lampAvenues = [0, 120, 240, -120];
-  for (let a = 0; a < lampAvenues.length; a += 1) {
-    const ax = lampAvenues[a];
-    for (let z = -310; z <= 310; z += 58) {
-      if (Math.abs(z % 120) < 20) continue;
-      for (const side of [-1, 1]) {
-        const lx = ax + side * 14.8;
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 8.2, 6), lampPoleMat);
-        pole.position.set(lx, 4.1, z);
-        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 8), bulbMat);
-        bulb.position.set(lx - side * 1.4, 8.1, z);
-        const pool = new THREE.Mesh(new THREE.CircleGeometry(6.5, 16), poolMat);
-        pool.rotation.x = -Math.PI / 2;
-        pool.position.set(lx - side * 1.6, 0.2, z);
-        group.add(pole, bulb, pool);
-        lamps.push(pool);
-      }
-    }
-  }
-
-  // Traffic Light Gantries at key intersections
-  const redSig = new THREE.MeshBasicMaterial({ color: '#ef4444' });
-  const grnSig = new THREE.MeshBasicMaterial({ color: '#22c55e' });
-  for (const ix of [0, 120, 240]) {
-    for (const iz of [-240, -120, 0, 120]) {
-      const gx = ix - 14.5;
-      const gz = iz - 14.5;
-      addBox(group, 0.35, 7.2, 0.35, lampPoleMat, gx, 3.6, gz, false);
-      addBox(group, 6.2, 0.32, 0.32, lampPoleMat, gx + 3.0, 7.0, gz, false);
-      addBox(group, 0.55, 1.4, 0.55, (ix + iz) % 240 === 0 ? grnSig : redSig, gx + 4.8, 6.5, gz, false);
-    }
-  }
-
-  // 8. Six Physical 3D Stunt Ramps
-  const rampSpecs = [
-    { id: 'ramp_coral', x: 252, z: -150, yaw: 0, w: 6.5, l: 14, h: 3.4 },
-    { id: 'ramp_pier', x: 278, z: 120, yaw: Math.PI / 2, w: 6.5, l: 13, h: 3.2 },
-    { id: 'ramp_mirage', x: 0, z: -290, yaw: 0, w: 6.5, l: 14, h: 3.5 },
-    { id: 'ramp_docks', x: -120, z: 290, yaw: Math.PI / 2, w: 7, l: 15, h: 3.8 },
-    { id: 'ramp_downtown', x: 120, z: 60, yaw: 0, w: 6.5, l: 14, h: 3.4 },
-    { id: 'ramp_isle', x: 560, z: -70, yaw: 0, w: 6.5, l: 14, h: 3.4 },
-  ];
-  const rampMat = new THREE.MeshStandardMaterial({ color: '#f97316', emissive: '#9a3412', emissiveIntensity: 0.35, roughness: 0.45 });
-  const rampStripeMat = new THREE.MeshBasicMaterial({ color: '#22d3ee' });
-  for (let i = 0; i < rampSpecs.length; i += 1) {
-    const r = rampSpecs[i];
-    const rg = new THREE.Group();
-    rg.position.set(r.x, 0.15, r.z);
-    rg.rotation.y = r.yaw;
-    const slope = Math.atan2(r.h, r.l);
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(r.w, 0.5, Math.hypot(r.l, r.h)), rampMat);
-    deck.position.set(0, r.h * 0.5, 0);
-    deck.rotation.x = -slope;
-    deck.castShadow = true;
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(r.w + 0.2, 0.22, 0.7), rampStripeMat);
-    edge.position.set(0, r.h + 0.1, r.l * 0.48);
-    rg.add(deck, edge);
-    group.add(rg);
-    ramps.push(r);
-  }
-
-  // 9. Service POI Glowing 3D Beacon Rings (Garages, Gun Shops, Safehouses)
-  for (let i = 0; i < SERVICE_POIS.length; i += 1) {
-    const p = SERVICE_POIS[i];
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(3.8, 0.22, 8, 28),
-      new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.85 }),
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(p.x, 0.45, p.z);
-    group.add(ring);
-    beacons.push({ mesh: ring, poi: p });
-  }
-
-  return {
-    group,
-    colliders,
-    skyRing,
-    lamps,
-    neonBands,
-    beacons,
-    ramps,
-    poolMat,
-  };
-}
-
-export function updateWorldLandmarks(world, dt, elapsed, timeOfDay) {
-  if (world.skyRing && world.skyRing.wheelPivot) {
-    world.skyRing.wheelPivot.rotation.z += dt * 0.26;
-    const pods = world.skyRing.pods;
-    for (let i = 0; i < pods.length; i += 1) {
-      pods[i].rotation.z = -world.skyRing.wheelPivot.rotation.z;
-    }
-  }
-  const t = ((timeOfDay % 24) + 24) % 24;
-  const nightFactor = (t >= 18.5 || t < 6.0) ? 0.44 : 0.14;
-  world.poolMat.opacity = nightFactor;
-
-  for (let i = 0; i < world.beacons.length; i += 1) {
-    const b = world.beacons[i].mesh;
-    b.position.y = 0.5 + Math.sin(elapsed * 3.0 + i) * 0.28;
-    const s = 1 + Math.sin(elapsed * 2.5 + i) * 0.08;
-    b.scale.set(s, s, 1);
-  }
+export function updateWorldLandmarks(w,dt,el,tod){
+if(w.skyRing?.wheelPivot){w.skyRing.wheelPivot.rotation.z+=dt*.26;for(const p of w.skyRing.pods)p.rotation.z=-w.skyRing.wheelPivot.rotation.z;}
+const t=((tod%24)+24)%24,dusk=t>=18.5||t<6;w.poolMat.opacity=dusk?.44:.08;
+for(const m of[w.roadMatNS,w.roadMatEW,w.interMat]){m.color.set(dusk?'#98a4be':'#dce3ed');m.emissiveIntensity=dusk?.36:.12;}
+for(const pt of w.twilightLights)pt.intensity=dusk?46:0;
+w.beacons.forEach((b,i)=>{const s=1+sin(el*2.5+i)*.08;b.mesh.position.y=.5+sin(el*3+i)*.28;b.mesh.scale.set(s,s,1);});
 }

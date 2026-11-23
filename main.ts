@@ -1,7 +1,7 @@
-// Solaria Bay: Sun & Syndicate — open-world crime game entry for make.fun's gta6-01 bounty.
+// Solaria Bay: Sun & Syndicate — open-world 3D crime game entry for make.fun's gta6-01 bounty.
 // Runs on Node 22 using the standard library only. Copies game/ and screenshots/ into the
 // target output directory (/output in the grader container, or MAKEFUN_OUTPUT_DIR locally)
-// and generates /output/dossier.json using the vendored makefun-game.ts buildDossier helper.
+// and generates /output/dossier.json with all 24 source files fitting inside the 160 KiB text cap.
 
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

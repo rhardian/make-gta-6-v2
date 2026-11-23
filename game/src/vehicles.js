@@ -1,693 +1,135 @@
-// Sculpted multi-part 3D vehicles (18 distinct models) with clearcoat metallic paint, spoked rotating
-// wheels, lightbars & blooms, AIR-1 helicopter spotlight cone, and arcade-sim drift/ramp/boat physics.
+// 18 sculpted 3D vehicles: two-tone white & navy SBPD cruisers, crimson Mako V12 GT, AIR-1 spotlight & physics.
+import*as THREE from'three';
+import{VEHICLES,WORLD}from'./config.js';
+import{SHARED_BEAM_TEX,SHARED_FLARE_TEX,SHARED_POOL_TEX}from'./effects-particles.js';
+import{pick}from'./random.js';
+import{createPoliceLiveryTextures}from'./textures-procedural.js';
+import{getGroundHeightAt,isWaterAt,resolveBuildingCollision}from'./world-city.js';
 
-import * as THREE from 'three';
-import { VEHICLES, WORLD } from './config.js';
-import { SHARED_FLARE_TEX } from './effects-particles.js';
-import { pick } from './random.js';
-import { getGroundHeightAt, isWaterAt, resolveBuildingCollision } from './world-city.js';
+const{Group:Grp,Mesh,BoxGeometry:Box,CylinderGeometry:Cyl,SphereGeometry:Sph,ConeGeometry:Cone,PlaneGeometry:Plane,CircleGeometry:Circ,TorusGeometry:Tor,MeshStandardMaterial:Std,MeshPhysicalMaterial:Phys,MeshBasicMaterial:Bas,SpriteMaterial:SprM,Sprite:Spr,Shape,ExtrudeGeometry,MathUtils:MU,AdditiveBlending:ADD,DoubleSide:DBL}=THREE;
+const{sin,cos,abs,min,max,hypot,random:R,floor,PI:P}=Math,H=P/2,cl=MU.clamp,lp=MU.lerp,{minX,maxX,minZ,maxZ,shorelineX}=WORLD;
+const sM=(c,r=.5,mt=0)=>new Std({color:c,roughness:r,metalness:mt}),pM=o=>new Phys(o),bM=(c,o={})=>new Bas({color:c,...o}),trM=(c,op,o={})=>bM(c,{transparent:true,opacity:op,depthWrite:false,...o});
 
-const SHARED_GEO = {
-  tire: new THREE.CylinderGeometry(0.42, 0.42, 0.34, 16),
-  rim: new THREE.CylinderGeometry(0.26, 0.26, 0.36, 12),
-  spoke: new THREE.BoxGeometry(0.46, 0.055, 0.37),
-  headlight: new THREE.BoxGeometry(0.42, 0.14, 0.08),
-  taillight: new THREE.BoxGeometry(0.56, 0.14, 0.08),
-};
-SHARED_GEO.tire.rotateZ(Math.PI / 2);
-SHARED_GEO.rim.rotateZ(Math.PI / 2);
+const G={t:new Cyl(.42,.42,.34,16).rotateZ(H),r:new Cyl(.27,.27,.36,12).rotateZ(H),s:new Box(.46,.055,.37),h:new Box(.44,.14,.08),tl:new Box(.56,.14,.08)};
+const M={tire:sM('#1b2029',.85),rim:sM('#e2eaf5',.22,.82),trim:sM('#242c3b',.5,.45),leather:sM('#bd7946',.68),glass:pM({color:'#132238',roughness:.08,metalness:.42,clearcoat:1,transparent:true,opacity:.92}),navy:pM({color:'#16305e',roughness:.24,metalness:.32,clearcoat:.85}),white:pM({color:'#f8fafc',roughness:.16,metalness:.2,clearcoat:1}),hl:bM('#fff9db'),tl:bM('#ff2042'),taxi:bM('#fde047'),fO:trM('#ff7b1c',.86,{blending:ADD}),fI:trM('#60d5ff',.9,{blending:ADD})};
+const CC=new Map();
+function chassisGeo(sp){
+if(CC.has(sp.id))return CC.get(sp.id);
+const{l:L,w:W,h:Ht,style:st,openTop:ot}=sp,hL=L/2,s=new Shape();
+const pts=['super','coupe','cabrio'].includes(st)?[[-hL,.36],[hL,.34],[hL,.56],[hL*.44,Ht*.56],...(ot?[[hL*.18,Ht*.62],[-hL*.48,Ht*.6]]:[[hL*.12,Ht*1.02],[-hL*.38,Ht*.98],[-hL*.88,Ht*.63]]),[-hL,.86]]:['suv','police_suv','van','swat','truck'].includes(st)?[[-hL,.38],[hL,.38],[hL,Ht*.46],[hL*.52,Ht*.54],[hL*.34,Ht],[-hL*.92,Ht],[-hL,Ht*.86]]:[[-hL,.36],[hL,.36],[hL,Ht*.49],[hL*.44,Ht*.58],[hL*.18,Ht*1.02],[-hL*.38,Ht*1.02],[-hL*.64,Ht*.6],[-hL,Ht*.56]];
+pts.forEach(([x,y],i)=>i?s.lineTo(x,y):s.moveTo(x,y));s.closePath();
+const g=new ExtrudeGeometry(s,{depth:W-.16,bevelEnabled:true,bevelThickness:.08,bevelSize:.07,bevelSegments:2});
+g.translate(0,0,-(W-.16)/2);g.rotateY(-H);g.computeVertexNormals();CC.set(sp.id,g);return g;
+}
+const add=(p,g,m,x,y,z,rx=0,ry=0)=>{const o=new Mesh(g,m);o.position.set(x,y,z);if(rx)o.rotation.x=rx;if(ry)o.rotation.y=ry;p.add(o);return o;};
+const B=(p,w,h,d,m,x,y,z,rx=0)=>add(p,new Box(w,h,d),m,x,y,z,rx),C=(p,a,b,h,sg,m,x,y,z,rx=0)=>add(p,new Cyl(a,b,h,sg),m,x,y,z,rx);
+const flr=(p,c,op,sx,sy,x,y,z)=>{const s=new Spr(new SprM({map:SHARED_FLARE_TEX,color:c,transparent:true,opacity:op,blending:ADD,depthWrite:false}));s.position.set(x,y,z);s.scale.set(sx,sy,1);p.add(s);return s;};
+function mkWh(){const pivot=new Grp(),spin=new Grp(),t=new Mesh(G.t,M.tire),s1=new Mesh(G.s,M.trim),s2=s1.clone();t.castShadow=true;s2.rotation.x=H;spin.add(t,new Mesh(G.r,M.rim),s1,s2);pivot.add(spin);return{pivot,spin};}
 
-function buildCarChassisGeo(spec) {
-  const L = spec.l;
-  const W = spec.w;
-  const H = spec.h;
-  const halfL = L * 0.5;
-  const shape = new THREE.Shape();
+export function buildVehicleMesh(sp,hex){
+const root=new Grp(),body=new Grp(),wheels=[];root.add(body);
+const arm=!!sp.armored,paintMat=pM({color:hex,roughness:arm?.34:.15,metalness:arm?.58:.44,clearcoat:arm?.45:1,clearcoatRoughness:.07,emissive:['cabrio','super'].includes(sp.style)?'#24050c':'#000',emissiveIntensity:.25});
+let sirens,mainRotor,tailRotor,spotlightCone,spotlightPool,nitroFlame;
 
-  if (spec.style === 'super' || spec.style === 'coupe' || spec.style === 'cabrio') {
-    const hoodY = H * 0.56;
-    const roofY = spec.openTop ? H * 0.62 : H * 1.02;
-    shape.moveTo(-halfL, 0.36);
-    shape.lineTo(halfL, 0.34);
-    shape.lineTo(halfL, 0.56);
-    shape.lineTo(halfL * 0.44, hoodY);
-    if (spec.openTop) {
-      shape.lineTo(halfL * 0.18, roofY);
-      shape.lineTo(-halfL * 0.48, hoodY * 1.08);
-    } else {
-      shape.lineTo(halfL * 0.12, roofY);
-      shape.lineTo(-halfL * 0.38, roofY * 0.96);
-      shape.lineTo(-halfL * 0.88, hoodY * 1.12);
-    }
-    shape.lineTo(-halfL, 0.86);
-    shape.closePath();
-  } else if (spec.style === 'suv' || spec.style === 'police_suv' || spec.style === 'van' || spec.style === 'swat' || spec.style === 'truck') {
-    const hoodY = H * 0.54;
-    shape.moveTo(-halfL, 0.38);
-    shape.lineTo(halfL, 0.38);
-    shape.lineTo(halfL, hoodY * 0.85);
-    shape.lineTo(halfL * 0.52, hoodY);
-    shape.lineTo(halfL * 0.34, H);
-    shape.lineTo(-halfL * 0.92, H);
-    shape.lineTo(-halfL, H * 0.86);
-    shape.closePath();
-  } else {
-    // Sleek muscle / sedan / police interceptor / taxi / limo / pickup
-    const hoodY = H * 0.58;
-    const roofY = H * 1.02;
-    shape.moveTo(-halfL, 0.36);
-    shape.lineTo(halfL, 0.36);
-    shape.lineTo(halfL, hoodY * 0.85);
-    shape.lineTo(halfL * 0.44, hoodY);
-    shape.lineTo(halfL * 0.18, roofY);
-    shape.lineTo(-halfL * 0.38, roofY);
-    shape.lineTo(-halfL * 0.64, hoodY * 1.04);
-    shape.lineTo(-halfL, hoodY * 0.96);
-    shape.closePath();
-  }
-
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: W - 0.14,
-    bevelEnabled: true,
-    bevelThickness: 0.08,
-    bevelSize: 0.07,
-    bevelSegments: 2,
-  });
-  // Extrude runs along +Z; rotate so profile X becomes vehicle forward +Z and extrusion centers on X
-  geo.translate(0, 0, -(W - 0.14) * 0.5);
-  geo.rotateY(-Math.PI / 2);
-  geo.computeVertexNormals();
-  return geo;
+if(sp.isHeli){
+const hu=C(body,1.15,1.3,4.6,12,M.white,0,1.5,.5,H);hu.scale.set(.95,1,.86);hu.castShadow=true;
+add(body,new Sph(1.12,12,10),M.glass,0,1.42,2.75).scale.set(.92,.8,1.45);C(body,.18,.45,5.4,8,M.white,0,1.78,-4.3,H);
+[[1.88,.72,4.3,M.navy,0,1.05,.45],[2.12,.32,4.2,M.navy,0,1.44,.4],[.18,1.9,1.15,M.white,0,2.38,-6.7],[2.2,.12,.55,M.navy,0,1.82,-5.8]].forEach(a=>B(body,...a));
+for(const s of[-1.15,1.15])C(body,.09,.09,5.2,6,M.trim,s,.22,.6,H);
+mainRotor=new Grp();mainRotor.position.set(0,2.95,.6);const b1=new Mesh(new Box(10.8,.08,.36),M.trim),b2=b1.clone();b2.rotation.y=H;
+mainRotor.add(b1,b2,add(mainRotor,new Circ(5.3,24),trM('#cbd5e1',.14,{side:DBL}),0,0,0,-H));body.add(mainRotor);
+tailRotor=new Grp();tailRotor.position.set(.42,2.5,-6.7);B(tailRotor,.08,1.8,.22,M.trim,0,0,0);body.add(tailRotor);
+spotlightCone=add(body,new Cone(7.2,34,28,1,true).translate(0,-17,0),trM('#e8f7ff',.21,{map:SHARED_BEAM_TEX,side:DBL}),0,.55,3.6,-.32);
+add(body,new Sph(.42,10,10),bM('#fff'),0,.55,3.75);spotlightPool=add(root,new Circ(7.8,24),trM('#fff8e2',.24,{map:SHARED_POOL_TEX}),0,0,0,-H);
+return{root,body,paintMat,wheels,mainRotor,tailRotor,spotlightCone,spotlightPool};
+}
+if(sp.isBoat){
+B(body,sp.w,.85,sp.l*.78,paintMat,0,.45,-.35).castShadow=true;add(body,new Cone(sp.w*.68,2.4,4),paintMat,0,.48,sp.l*.48,H,P/4).scale.set(1,1,.42);
+B(body,sp.w+.06,.22,sp.l*.74,sM(sp.stripe||'#ff4d6d',.3),0,.76,-.2);B(body,sp.w*.78,.55,1.15,M.glass,0,1.12,.45,-.38);B(body,sp.w*.7,.48,1.3,M.leather,0,.85,-1);
+return{root,body,paintMat,wheels};
+}
+if(sp.isBike){
+B(body,.48,.58,sp.l*.72,paintMat,0,.68,0).castShadow=true;[[.54,.46,.72,paintMat,0,.92,sp.l*.28,.28],[.42,.32,.25,M.glass,0,1.18,sp.l*.35],[.42,.16,.88,M.trim,0,.96,-.34]].forEach(a=>B(body,...a));add(body,G.h,M.hl,0,.86,sp.l*.46);
+for(const wz of[sp.l*.34,-sp.l*.34]){const w=mkWh();w.pivot.scale.set(.55,.85,.85);w.pivot.position.set(0,.38,wz);body.add(w.pivot);wheels.push({...w,front:wz>0});}
+return{root,body,paintMat,wheels};
 }
 
-const CHASSIS_CACHE = new Map();
-function getChassisGeo(spec) {
-  if (!CHASSIS_CACHE.has(spec.id)) CHASSIS_CACHE.set(spec.id, buildCarChassisGeo(spec));
-  return CHASSIS_CACHE.get(spec.id);
+const{l:L,w:W,h:Ht,style:st}=sp,tall=['suv','van','truck','swat','police_suv'].includes(st);
+const ch=add(body,chassisGeo(sp),paintMat,0,0,0);ch.castShadow=ch.receiveShadow=true;B(body,W-.12,.18,L-.18,M.trim,0,.34,0);B(body,W*.88,.24,.18,M.trim,0,.46,-L*.502);
+if(st==='super')for(const fx of[-.55,-.2,.2,.55])B(body,.06,.22,.22,M.trim,fx,.45,-L*.515);
+if(st==='van')[[W*.88,.08,L*.72,M.rim,0,Ht+.04,-.2],[W*.76,.42,.14,M.trim,0,.78,L*.505],[W+.06,.24,L*.78,M.taxi,0,1.15,-.1]].forEach(a=>B(body,...a));
+const lH=tall?Ht*.54:Ht*.56,cLen=['van','swat','truck'].includes(st)?L*.72:['suv','police_suv','limo'].includes(st)?L*.58:L*.44,cH=tall?Ht*.38:Ht*.36,cZ=st==='super'?-.22:-.14;
+if(sp.openTop){B(body,W*.84,.44,.1,M.glass,0,lH+.24,L*.16,-.56);B(body,W*.78,.26,cLen*.9,M.leather,0,lH+.04,-.22);for(const sx of[-.42,.42])add(body,new Tor(.26,.045,6,12,P),M.rim,sx,lH+.14,-.88);}
+else[[W*.93,cH*.9,cLen*.94,M.glass,0,lH+cH*.52,cZ],[W*.85,cH*1.1,.14,M.glass,0,lH+cH*.46,cZ+cLen*.58,-.78],[W*.84,cH*1.15,.16,M.glass,0,lH+cH*.52,cZ-cLen*.64,st==='super'?1.12:.68]].forEach(a=>B(body,...a));
+if(sp.isPolice){
+const pT=createPoliceLiveryTextures(),sw=st==='swat',pm=map=>pM({map,roughness:.2,metalness:.18,clearcoat:.92}),sMat=pm(sw?pT.swatSide:pT.side);
+if(!sw){for(const sz of[.39,-.39])B(body,W+.04,lH*.42,L*.22,M.navy,0,.52,L*sz);B(body,W*.88,.07,cLen*.88,M.white,0,Ht+.03,cZ);add(body,new Plane(W*.52,lH*.4),pm(pT.rear),0,.72,-L*.514,0,P);}
+const dG=new Plane(L*.62,lH*.72),bY=Ht+.12,gG=new Plane(5.6,5.6).rotateX(-H);
+add(body,dG,sMat,W*.508,.44+lH*.36,.02,0,H);add(body,dG,sMat,-W*.508,.44+lH*.36,.02,0,-H);B(body,W*.76,.5,.24,M.trim,0,.62,L*.53);B(body,W*.68,.11,.32,M.trim,0,bY,cZ+.1);
+sirens=[B(body,W*.3,.2,.34,bM('#ff2448'),-W*.17,bY+.11,cZ+.1),B(body,W*.3,.2,.34,bM('#2998ff'),W*.17,bY+.11,cZ+.1),flr(body,'#ff2b52',.88,3.2,3.2,-W*.17,bY+.11,cZ+.1),flr(body,'#38bdf8',.88,3.2,3.2,W*.17,bY+.11,cZ+.1),add(body,gG,trM('#ff2a55',.26,{map:SHARED_POOL_TEX,blending:ADD}),-1.1,.22,-.4),add(body,gG,trM('#38bdf8',.26,{map:SHARED_POOL_TEX,blending:ADD}),1.1,.22,-.4)];
+}
+if(sp.stripe&&st!=='van')B(body,.38,.04,L*.9,sM(sp.stripe,.3),0,Ht*.72,0);
+if(sp.spoiler)[[W*.94,.07,.34,0,lH+.38],[.07,.3,.15,-W*.34,lH+.22],[.07,.3,.15,W*.34,lH+.22]].forEach(([a,b,c,x,y])=>B(body,a,b,c,M.trim,x,y,-L*.44));
+if(sp.scoop)B(body,.58,.24,.82,M.rim,0,lH+.12,L*.24);if(sp.taxiSign)B(body,.76,.24,.28,M.taxi,0,Ht+.14,.05);
+for(const sx of[-W*.34,W*.34]){add(body,G.h,M.hl,sx,.62,L*.51);add(body,G.tl,M.tl,sx,.74,-L*.516);C(body,.07,.07,.22,8,M.rim,sx*.68,.42,-L*.52,H);}
+if(st==='super'||st==='coupe'){B(body,W*.86,.085,.07,M.tl,0,.75,-L*.518);for(const sx of[-W*.34,W*.34])flr(body,'#ff2b4a',.42,1.1,.5,sx,.75,-L*.54);}
+nitroFlame=new Grp();nitroFlame.visible=false;
+for(const sx of[-W*.23,W*.23]){add(nitroFlame,new Cone(.085,.78,10),M.fO,sx,.42,-L/2-.39,-H);add(nitroFlame,new Cone(.045,.46,8),M.fI,sx,.42,-L/2-.25,-H);flr(nitroFlame,'#ff8a24',.55,.65,.65,sx,.42,-L/2-.26);}
+body.add(nitroFlame);
+const wx=W*.495,zF=L*.31;for(const[x,z,front]of[[-wx,zF,1],[wx,zF,1],[-wx,-zF,0],[wx,-zF,0]]){const w=mkWh();w.pivot.position.set(x,.42,z);body.add(w.pivot);wheels.push({...w,front:!!front});}
+return{root,body,paintMat,wheels,sirens,nitroFlame};
 }
 
-const SHARED_MAT = {
-  tire: new THREE.MeshStandardMaterial({ color: '#14171f', roughness: 0.88 }),
-  rim: new THREE.MeshStandardMaterial({ color: '#dbe4f0', roughness: 0.25, metalness: 0.85 }),
-  glass: new THREE.MeshPhysicalMaterial({ color: '#0c1829', roughness: 0.12, metalness: 0.35, clearcoat: 1.0, transparent: true, opacity: 0.86 }),
-  trim: new THREE.MeshStandardMaterial({ color: '#181e2b', roughness: 0.55, metalness: 0.4 }),
-  leather: new THREE.MeshStandardMaterial({ color: '#a16236', roughness: 0.72 }),
-  headlight: new THREE.MeshBasicMaterial({ color: '#fff8d6' }),
-  taillight: new THREE.MeshBasicMaterial({ color: '#ff2b4a' }),
-  whitePaint: new THREE.MeshPhysicalMaterial({ color: '#f8fafc', roughness: 0.22, metalness: 0.25, clearcoat: 0.9 }),
-  taxiGlow: new THREE.MeshBasicMaterial({ color: '#fde047' }),
-  nitro: new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }),
-};
+let vid=1;
+export function spawnVehicle(sc,id,x,z,yaw,rng,o={}){
+const spec=VEHICLES[id]||VEHICLES.brisa_sedan,color=o.color||pick(rng,spec.colors),rig=buildVehicleMesh(spec,color),y=o.y??(spec.isHeli?26:getGroundHeightAt(x,z));
+rig.root.position.set(x,y,z);rig.root.rotation.y=yaw;sc.add(rig.root);
+return{id:vid++,modelId:spec.id,spec,color,rig,x,y,z,vx:0,vy:0,vz:0,yaw,speed:o.speed||0,steer:0,drifting:false,nitro:100,nitroActive:false,health:o.health??spec.hp,maxHealth:spec.hp,destroyed:!!o.destroyed,burning:!!o.burning,driverType:o.driverType||'parked',siren:!!(o.siren||(spec.isPolice&&o.driverType==='police')),callsign:o.callsign||'',tactic:o.tactic||'',roadAxis:o.roadAxis||'z',roadDir:o.roadDir||1,upgrades:{engine:0,armor:0,handling:0},rollAngle:0,pitchAngle:0,airTime:0,spikeTimer:0,missionTag:o.missionTag||null};
+}
+export function repaintVehicle(v,c){v.color=c;v.rig.paintMat.color.set(c);}
+export function removeVehicle(sc,l,v){sc.remove(v.rig.root);const i=l.indexOf(v);if(i>=0)l.splice(i,1);}
 
-function makeWheel() {
-  const pivot = new THREE.Group();
-  const spin = new THREE.Group();
-  const tire = new THREE.Mesh(SHARED_GEO.tire, SHARED_MAT.tire);
-  tire.castShadow = true;
-  const rim = new THREE.Mesh(SHARED_GEO.rim, SHARED_MAT.rim);
-  const sp1 = new THREE.Mesh(SHARED_GEO.spoke, SHARED_MAT.trim);
-  const sp2 = new THREE.Mesh(SHARED_GEO.spoke, SHARED_MAT.trim);
-  sp2.rotation.x = Math.PI / 2;
-  spin.add(tire, rim, sp1, sp2);
-  pivot.add(spin);
-  return { pivot, spin };
+export function stepVehiclePhysics(v,c,w,fx,dt,el){
+const sp=v.spec,rg=v.rig,sync=()=>{rg.root.position.set(v.x,v.y,v.z);rg.root.rotation.y=v.yaw;};
+if(sp.isHeli){if(rg.mainRotor)rg.mainRotor.rotation.y+=dt*26;if(rg.tailRotor)rg.tailRotor.rotation.x+=dt*34;sync();if(rg.spotlightPool&&rg.spotlightCone){rg.spotlightPool.visible=rg.spotlightCone.visible;rg.spotlightPool.position.set(0,-v.y+.24,12.5);}return;}
+if(rg.sirens){const r=floor(el*9+v.id)%2===0,a=v.siren&&!v.destroyed,[sR,sB,bR,bB,gR,gB]=rg.sirens;sR.visible=!a||r;sB.visible=!a||!r;bR.visible=gR.visible=a&&r;bB.visible=gB.visible=a&&!r;}
+if(v.destroyed){v.speed*=max(0,1-dt*4);if(v.burning&&R()<.45)fx.spawnFireFlame(v.x,v.y+.9,v.z,1.1);return sync();}
+const th=c.throttle||0,st=c.steer||0,hb=!!c.handbrake,bst=!!c.nitro&&v.nitro>4&&th>.1,eM=1+(v.upgrades?.engine||0)*.12,hM=1+(v.upgrades?.handling||0)*.12,maxS=sp.maxSpd*eM*(bst?1.28:1)*(v.spikeTimer>0?.52:1),acc=sp.accel*eM*(bst?1.45:1);
+v.nitro=bst?max(0,v.nitro-dt*28):min(100,v.nitro+dt*11);v.nitroActive=bst;if(rg.nitroFlame){rg.nitroFlame.visible=bst;if(bst)rg.nitroFlame.scale.set(1,1,.85+R()*.35);}
+if(v.spikeTimer>0)v.spikeTimer=max(0,v.spikeTimer-dt);
+const fX=sin(v.yaw),fZ=cos(v.yaw),rX=-cos(v.yaw),rZ=sin(v.yaw);let fwd=v.vx*fX+v.vz*fZ,lat=v.vx*rX+v.vz*rZ;
+fwd=th>.01?fwd+acc*th*dt:th<-.01?fwd+(fwd>2?-acc*1.45*dt:acc*.6*th*dt):fwd*max(0,1-dt*(sp.isBoat?1.2:1.55));
+if(hb)fwd*=max(0,1-dt*2.1);fwd=cl(fwd,-maxS*.38,maxS);
+const sR=min(1,abs(fwd)/14);v.steer=lp(v.steer,st*(hb?1.38:1),min(1,dt*10));v.yaw+=v.steer*sp.turn*hM*sR*(fwd>=-.5?1:-1)*dt;
+lat*=max(0,1-dt*(sp.isBoat?2.4:hb?1.8:6.4*hM));
+const nfX=sin(v.yaw),nfZ=cos(v.yaw),nrX=-cos(v.yaw),nrZ=sin(v.yaw);v.vx=nfX*fwd+nrX*lat;v.vz=nfZ*fwd+nrZ*lat;v.speed=hypot(v.vx,v.vz);v.drifting=!sp.isBoat&&abs(lat)>4.2&&v.speed>14;
+const nx=cl(v.x+v.vx*dt,minX,maxX),nz=cl(v.z+v.vz*dt,minZ,maxZ),nW=isWaterAt(nx,nz);
+if(sp.isBoat){if(nW||nx>shorelineX-6){v.x=nx;v.z=nz;}else{v.vx*=-.3;v.vz*=-.3;}v.y=-.15+sin(el*2.5+v.x*.08)*.18;if(v.speed>8&&R()<.5)fx.spawnDriftSmoke(v.x-nfX*2.6,.1,v.z-nfZ*2.6,1,.5);}
+else{
+if(nW&&v.y<1.2){v.vx*=-.45;v.vz*=-.45;}else{v.x=nx;v.z=nz;}
+const col=resolveBuildingCollision(w,v.x,v.z,sp.w*.62);if(col.hit){v.x=col.x;v.z=col.z;if(v.speed>16)fx.spawnSparks(v.x,v.y+.8,v.z,8);v.vx*=.35;v.vz*=.35;}
+const gy=getGroundHeightAt(v.x,v.z,w.ramps);
+if(v.y>gy+.06||v.vy>.1){v.vy-=26*dt;v.y+=v.vy*dt;v.airTime+=dt;if(v.y<=gy){v.y=gy;v.vy=0;if(v.airTime>.45)fx.spawnSparks(v.x,v.y+.3,v.z,10);v.airTime=0;}}
+else{if(gy-v.y>.08&&v.speed>20)v.vy=min(13,(gy-v.y)/max(dt,.016)*.52);v.y=gy;}
+}
+if(v.drifting&&!v.airTime){const bX=v.x-nfX*sp.l*.36,bZ=v.z-nfZ*sp.l*.36;if(R()<.65)for(const s of[-.85,.85])fx.spawnDriftSmoke(bX+nrX*s,v.y,bZ+nrZ*s,1,.38);if(R()<.65)for(const s of[-.82,.82])fx.addSkidmark(bX+nrX*s,v.y,bZ+nrZ*s,v.yaw);}
+if(v.health<v.maxHealth*.35&&R()<.25)fx.spawnParticle(v.x+nfX*1.4,v.y+1.1,v.z+nfZ*1.4,0,2.2,0,.7,'#475569',.7,{opacity:.38,grow:2});
+for(const wh of rg.wheels){wh.spin.rotation.x+=fwd/.42*dt;if(wh.front)wh.pivot.rotation.y=v.steer*.46;}
+v.rollAngle=lp(v.rollAngle,cl(-v.steer*sR*(sp.isBike?.34:.085),-.35,.35),min(1,dt*8));v.pitchAngle=lp(v.pitchAngle,cl(-th*.035,-.05,.05),min(1,dt*8));
+sync();rg.body.rotation.z=v.rollAngle;rg.body.rotation.x=v.pitchAngle;
 }
 
-export function buildVehicleMesh(spec, paintHex) {
-  const root = new THREE.Group();
-  const body = new THREE.Group();
-  root.add(body);
-
-  const paintMat = new THREE.MeshPhysicalMaterial({
-    color: paintHex,
-    roughness: 0.2,
-    metalness: 0.48,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.12,
-  });
-
-  const wheels = [];
-  let sirenRed = null;
-  let sirenBlue = null;
-  let sirenBloomR = null;
-  let sirenBloomB = null;
-  let mainRotor = null;
-  let tailRotor = null;
-  let spotlightCone = null;
-  let nitroFlame = null;
-
-  if (spec.isHeli) {
-    // Sleek sculpted AIR-1 SBPD Falcon Helicopter with spinning rotors & volumetric translucent spotlight cone!
-    const hull = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.3, 4.6, 12), paintMat);
-    hull.rotation.x = Math.PI / 2;
-    hull.scale.set(0.95, 1.0, 0.86);
-    hull.position.set(0, 1.5, 0.5);
-    hull.castShadow = true;
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(1.12, 12, 10), SHARED_MAT.glass);
-    nose.scale.set(0.92, 0.8, 1.45);
-    nose.position.set(0, 1.42, 2.75);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.18, 0.36, 4.2), SHARED_MAT.whitePaint);
-    stripe.position.set(0, 1.38, 0.4);
-    const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.45, 5.4, 8), paintMat);
-    boom.rotation.x = Math.PI / 2;
-    boom.position.set(0, 1.78, -4.3);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.9, 1.15), SHARED_MAT.whitePaint);
-    fin.position.set(0, 2.38, -6.7);
-    const horizFin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.12, 0.55), paintMat);
-    horizFin.position.set(0, 1.82, -5.8);
-    body.add(hull, nose, stripe, boom, fin, horizFin);
-
-    // Landing skids
-    for (const s of [-1.15, 1.15]) {
-      const skid = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 5.2, 6), SHARED_MAT.trim);
-      skid.rotation.x = Math.PI / 2;
-      skid.position.set(s, 0.22, 0.6);
-      body.add(skid);
-    }
-
-    // Spinning 4-blade main rotor & tail rotor
-    mainRotor = new THREE.Group();
-    mainRotor.position.set(0, 2.95, 0.6);
-    const bladeGeo = new THREE.BoxGeometry(10.8, 0.08, 0.38);
-    const b1 = new THREE.Mesh(bladeGeo, SHARED_MAT.trim);
-    const b2 = new THREE.Mesh(bladeGeo, SHARED_MAT.trim);
-    b2.rotation.y = Math.PI / 2;
-    const rotorDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(5.3, 24),
-      new THREE.MeshBasicMaterial({ color: '#94a3b8', transparent: true, opacity: 0.16, side: THREE.DoubleSide }),
-    );
-    rotorDisc.rotation.x = -Math.PI / 2;
-    mainRotor.add(b1, b2, rotorDisc);
-    body.add(mainRotor);
-
-    tailRotor = new THREE.Group();
-    tailRotor.position.set(0.42, 2.5, -6.7);
-    const tb = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.8, 0.22), SHARED_MAT.trim);
-    tailRotor.add(tb);
-    body.add(tailRotor);
-
-    // Volumetric translucent spotlight cone pointing down/forward
-    const coneGeo = new THREE.ConeGeometry(8.8, 38, 28, 1, true);
-    coneGeo.translate(0, -19, 0);
-    const coneMat = new THREE.MeshBasicMaterial({
-      color: '#e0f7ff',
-      transparent: true,
-      opacity: 0.21,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    spotlightCone = new THREE.Mesh(coneGeo, coneMat);
-    spotlightCone.position.set(0, 0.55, 3.6);
-    spotlightCone.rotation.x = -0.34;
-    body.add(spotlightCone);
-
-    const lampOrb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.55, 10, 10),
-      new THREE.MeshBasicMaterial({ color: '#ffffff' }),
-    );
-    lampOrb.position.set(0, 0.55, 3.8);
-    body.add(lampOrb);
-
-    return { root, body, paintMat, wheels, mainRotor, tailRotor, spotlightCone };
-  }
-
-  if (spec.isBoat) {
-    // Sleek V-hull Corsair 380 Speedboat
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(spec.w, 0.85, spec.l * 0.78), paintMat);
-    hull.position.set(0, 0.45, -0.35);
-    hull.castShadow = true;
-    const bow = new THREE.Mesh(new THREE.ConeGeometry(spec.w * 0.68, 2.4, 4), paintMat);
-    bow.rotation.x = Math.PI / 2;
-    bow.rotation.y = Math.PI / 4;
-    bow.scale.set(1, 1, 0.42);
-    bow.position.set(0, 0.48, spec.l * 0.48);
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(spec.w + 0.06, 0.22, spec.l * 0.74),
-      new THREE.MeshStandardMaterial({ color: spec.stripe || '#ff4d6d', roughness: 0.3 }),
-    );
-    stripe.position.set(0, 0.76, -0.2);
-    const shield = new THREE.Mesh(new THREE.BoxGeometry(spec.w * 0.78, 0.55, 1.15), SHARED_MAT.glass);
-    shield.position.set(0, 1.12, 0.45);
-    shield.rotation.x = -0.38;
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(spec.w * 0.7, 0.48, 1.3), SHARED_MAT.leather);
-    seat.position.set(0, 0.85, -1.0);
-    body.add(hull, bow, stripe, shield, seat);
-    return { root, body, paintMat, wheels };
-  }
-
-  if (spec.isBike) {
-    // Sport Motorcycle / Coastal Scooter
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.58, spec.l * 0.72), paintMat);
-    frame.position.set(0, 0.68, 0);
-    frame.castShadow = true;
-    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.46, 0.72), paintMat);
-    cowl.position.set(0, 0.92, spec.l * 0.28);
-    cowl.rotation.x = 0.28;
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.32, 0.25), SHARED_MAT.glass);
-    screen.position.set(0, 1.18, spec.l * 0.35);
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.88), SHARED_MAT.trim);
-    seat.position.set(0, 0.96, -0.34);
-    const hl = new THREE.Mesh(SHARED_GEO.headlight, SHARED_MAT.headlight);
-    hl.position.set(0, 0.86, spec.l * 0.46);
-    body.add(frame, cowl, screen, seat, hl);
-    for (const wz of [spec.l * 0.34, -spec.l * 0.34]) {
-      const w = makeWheel();
-      w.pivot.scale.set(0.55, 0.85, 0.85);
-      w.pivot.position.set(0, 0.38, wz);
-      body.add(w.pivot);
-      wheels.push({ ...w, front: wz > 0 });
-    }
-    return { root, body, paintMat, wheels };
-  }
-
-  // Sculpted 4-Wheel Automobiles using smooth beveled ExtrudeGeometry silhouettes!
-  const L = spec.l;
-  const W = spec.w;
-  const H = spec.h;
-  const isTall = spec.style === 'suv' || spec.style === 'van' || spec.style === 'truck' || spec.style === 'swat' || spec.style === 'police_suv';
-
-  // Sleek beveled aerodynamic chassis + dark lower diffuser & rocker skirts
-  const chassis = new THREE.Mesh(getChassisGeo(spec), paintMat);
-  chassis.castShadow = true;
-  chassis.receiveShadow = true;
-  const skirt = new THREE.Mesh(new THREE.BoxGeometry(W - 0.12, 0.18, L - 0.18), SHARED_MAT.trim);
-  skirt.position.set(0, 0.34, 0);
-  const rearDiff = new THREE.Mesh(new THREE.BoxGeometry(W * 0.86, 0.24, 0.16), SHARED_MAT.trim);
-  rearDiff.position.set(0, 0.46, -L * 0.502);
-  body.add(chassis, skirt, rearDiff);
-
-  const lowerH = isTall ? H * 0.54 : H * 0.56;
-  const cabLen = spec.style === 'van' || spec.style === 'swat' || spec.style === 'truck' ? L * 0.72
-    : spec.style === 'suv' || spec.style === 'police_suv' ? L * 0.58
-    : spec.style === 'limo' ? L * 0.58 : L * 0.44;
-  const cabH = isTall ? H * 0.38 : H * 0.36;
-  const cabZ = spec.style === 'super' ? -0.22 : -0.14;
-
-  if (spec.openTop) {
-    const ws = new THREE.Mesh(new THREE.BoxGeometry(W * 0.84, 0.44, 0.1), SHARED_MAT.glass);
-    ws.position.set(0, lowerH + 0.24, L * 0.16);
-    ws.rotation.x = -0.56;
-    const tub = new THREE.Mesh(new THREE.BoxGeometry(W * 0.78, 0.26, cabLen * 0.9), SHARED_MAT.leather);
-    tub.position.set(0, lowerH + 0.04, -0.22);
-    const bar = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.045, 6, 12, Math.PI), SHARED_MAT.rim);
-    bar.position.set(-0.42, lowerH + 0.14, -0.88);
-    const bar2 = bar.clone();
-    bar2.position.x = 0.42;
-    body.add(ws, tub, bar, bar2);
-  } else {
-    // Sleek dark tinted wraparound windshield, side & rear windows proud of chassis curve
-    const glassWrap = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, cabH * 0.92, cabLen * 0.94), SHARED_MAT.glass);
-    glassWrap.position.set(0, lowerH + cabH * 0.52, cabZ);
-    const frontGlass = new THREE.Mesh(new THREE.BoxGeometry(W * 0.86, cabH * 1.1, 0.14), SHARED_MAT.glass);
-    frontGlass.position.set(0, lowerH + cabH * 0.46, cabZ + cabLen * 0.56);
-    frontGlass.rotation.x = -0.78;
-    const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(W * 0.84, cabH * 1.15, 0.14), SHARED_MAT.glass);
-    rearGlass.position.set(0, lowerH + cabH * 0.42, cabZ - cabLen * 0.58);
-    rearGlass.rotation.x = 0.82;
-    body.add(glassWrap, frontGlass, rearGlass);
-  }
-
-  // Police white doors + white roof panel + heavy bull-bar + glowing soft sprite Red/Blue Lightbar Flares!
-  if (spec.isPolice) {
-    const doors = new THREE.Mesh(new THREE.BoxGeometry(W + 0.05, lowerH * 0.58, L * 0.44), SHARED_MAT.whitePaint);
-    doors.position.set(0, 0.44 + lowerH * 0.26, 0.02);
-    const roofW = new THREE.Mesh(new THREE.BoxGeometry(W * 0.82, 0.08, cabLen * 0.8), SHARED_MAT.whitePaint);
-    roofW.position.set(0, H + 0.02, cabZ);
-    const pushBar = new THREE.Mesh(new THREE.BoxGeometry(W * 0.76, 0.52, 0.24), SHARED_MAT.trim);
-    pushBar.position.set(0, 0.62, L * 0.54);
-    body.add(doors, roofW, pushBar);
-
-    const barY = H + 0.12;
-    const baseBar = new THREE.Mesh(new THREE.BoxGeometry(W * 0.66, 0.11, 0.32), SHARED_MAT.trim);
-    baseBar.position.set(0, barY, cabZ + 0.1);
-    const matR = new THREE.MeshBasicMaterial({ color: '#ff2448' });
-    const matB = new THREE.MeshBasicMaterial({ color: '#2998ff' });
-    sirenRed = new THREE.Mesh(new THREE.BoxGeometry(W * 0.29, 0.19, 0.34), matR);
-    sirenRed.position.set(-W * 0.17, barY + 0.11, cabZ + 0.1);
-    sirenBlue = new THREE.Mesh(new THREE.BoxGeometry(W * 0.29, 0.19, 0.34), matB);
-    sirenBlue.position.set(W * 0.17, barY + 0.11, cabZ + 0.1);
-
-    const flareMatR = new THREE.SpriteMaterial({ map: SHARED_FLARE_TEX, color: '#ff2b52', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
-    const flareMatB = new THREE.SpriteMaterial({ map: SHARED_FLARE_TEX, color: '#38bdf8', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
-    sirenBloomR = new THREE.Sprite(flareMatR);
-    sirenBloomR.position.copy(sirenRed.position);
-    sirenBloomR.scale.setScalar(3.0);
-    sirenBloomB = new THREE.Sprite(flareMatB);
-    sirenBloomB.position.copy(sirenBlue.position);
-    sirenBloomB.scale.setScalar(3.0);
-    body.add(baseBar, sirenRed, sirenBlue, sirenBloomR, sirenBloomB);
-  }
-
-  // Distinct Styling Details: twin racing stripes, GT spoiler, muscle hood blower, taxi sign
-  if (spec.stripe) {
-    const st = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 0.04, L * 0.92),
-      new THREE.MeshStandardMaterial({ color: spec.stripe, roughness: 0.32 }),
-    );
-    st.position.set(0, H * 0.72, 0);
-    body.add(st);
-  }
-  if (spec.spoiler) {
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, 0.07, 0.36), SHARED_MAT.trim);
-    wing.position.set(0, lowerH + 0.42, -L * 0.44);
-    const strutL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.34, 0.16), SHARED_MAT.trim);
-    strutL.position.set(-W * 0.34, lowerH + 0.24, -L * 0.44);
-    const strutR = strutL.clone();
-    strutR.position.x = W * 0.34;
-    body.add(wing, strutL, strutR);
-  }
-  if (spec.scoop) {
-    const sc = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.24, 0.82), SHARED_MAT.rim);
-    sc.position.set(0, lowerH + 0.12, L * 0.24);
-    body.add(sc);
-  }
-  if (spec.taxiSign) {
-    const ts = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.24, 0.28), SHARED_MAT.taxiGlow);
-    ts.position.set(0, H + 0.14, 0.05);
-    body.add(ts);
-  }
-
-  // Crisp LED Headlights, Wide Supercar Taillight Bar & Dual Exhausts + Nitro Flame
-  for (const sx of [-W * 0.34, W * 0.34]) {
-    const hl = new THREE.Mesh(SHARED_GEO.headlight, SHARED_MAT.headlight);
-    hl.position.set(sx, 0.62, L * 0.51);
-    const tl = new THREE.Mesh(SHARED_GEO.taillight, SHARED_MAT.taillight);
-    tl.position.set(sx, 0.72, -L * 0.51);
-    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.22, 8), SHARED_MAT.rim);
-    pipe.rotation.x = Math.PI / 2;
-    pipe.position.set(sx * 0.65, 0.42, -L * 0.52);
-    body.add(hl, tl, pipe);
-  }
-  if (spec.style === 'super' || spec.style === 'coupe') {
-    const ledBar = new THREE.Mesh(new THREE.BoxGeometry(W * 0.84, 0.07, 0.06), SHARED_MAT.taillight);
-    ledBar.position.set(0, 0.74, -L * 0.515);
-    body.add(ledBar);
-  }
-  nitroFlame = new THREE.Mesh(new THREE.ConeGeometry(0.24, 1.5, 8), SHARED_MAT.nitro);
-  nitroFlame.rotation.x = -Math.PI / 2;
-  nitroFlame.position.set(0, 0.46, -L * 0.5 - 0.7);
-  nitroFlame.visible = false;
-  body.add(nitroFlame);
-
-  // 4 Spoked Rotating & Steering Wheels
-  const wx = W * 0.48;
-  const wzF = L * 0.31;
-  const wzR = -L * 0.31;
-  const wCoords = [[-wx, wzF, true], [wx, wzF, true], [-wx, wzR, false], [wx, wzR, false]];
-  for (let i = 0; i < wCoords.length; i += 1) {
-    const [x, z, front] = wCoords[i];
-    const w = makeWheel();
-    w.pivot.position.set(x, 0.42, z);
-    body.add(w.pivot);
-    wheels.push({ ...w, front });
-  }
-
-  return {
-    root, body, paintMat, wheels,
-    sirenRed, sirenBlue, sirenBloomR, sirenBloomB, nitroFlame,
-  };
+export function resolveVehicleCollisions(vh,fx){
+for(let i=0;i<vh.length;i++){
+const a=vh[i];if(a.spec.isHeli)continue;
+for(let j=i+1;j<vh.length;j++){
+const b=vh[j];if(b.spec.isHeli)continue;
+const dx=b.x-a.x,dz=b.z-a.z,mD=(a.spec.w+b.spec.w)*.56+.6,d2=dx*dx+dz*dz;
+if(d2>.001&&d2<mD*mD){
+const d=Math.sqrt(d2),nx=dx/d,nz=dz/d,ov=(mD-d)*.55;a.x-=nx*ov;a.z-=nz*ov;b.x+=nx*ov;b.z+=nz*ov;
+const rel=(b.vx-a.vx)*nx+(b.vz-a.vz)*nz;
+if(rel<0){const imp=-rel*.72;a.vx-=nx*imp;a.vz-=nz*imp;b.vx+=nx*imp;b.vz+=nz*imp;if(abs(rel)>10){fx.spawnSparks((a.x+b.x)/2,max(a.y,b.y)+.85,(a.z+b.z)/2,10);const dmg=min(28,abs(rel)*.45);for(const u of[a,b])if(!u.destroyed)u.health=max(5,u.health-dmg*(u.driverType==='player'?.35:.75));}}
 }
-
-let nextVehId = 1;
-
-export function spawnVehicle(scene, modelId, x, z, yaw, rng, opts = {}) {
-  const spec = VEHICLES[modelId] || VEHICLES.brisa_sedan;
-  const color = opts.color || pick(rng, spec.colors);
-  const rig = buildVehicleMesh(spec, color);
-  const y = opts.y ?? (spec.isHeli ? 26 : getGroundHeightAt(x, z));
-  rig.root.position.set(x, y, z);
-  rig.root.rotation.y = yaw;
-  scene.add(rig.root);
-
-  return {
-    id: nextVehId++,
-    modelId: spec.id,
-    spec,
-    color,
-    rig,
-    x, y, z,
-    vx: 0, vy: 0, vz: 0,
-    yaw,
-    speed: opts.speed || 0,
-    steer: 0,
-    drifting: false,
-    nitro: 100,
-    nitroActive: false,
-    health: opts.health ?? spec.hp,
-    maxHealth: spec.hp,
-    destroyed: Boolean(opts.destroyed),
-    burning: Boolean(opts.burning),
-    driverType: opts.driverType || 'parked', // player | traffic | police | parked | mission
-    siren: Boolean(opts.siren || (spec.isPolice && opts.driverType === 'police')),
-    callsign: opts.callsign || '',
-    tactic: opts.tactic || '',
-    roadAxis: opts.roadAxis || 'z',
-    roadDir: opts.roadDir || 1,
-    upgrades: { engine: 0, armor: 0, handling: 0 },
-    rollAngle: 0,
-    pitchAngle: 0,
-    airTime: 0,
-    spikeTimer: 0,
-    missionTag: opts.missionTag || null,
-  };
 }
-
-export function repaintVehicle(v, newColor) {
-  v.color = newColor;
-  v.rig.paintMat.color.set(newColor);
 }
-
-export function removeVehicle(scene, vehicles, v) {
-  scene.remove(v.rig.root);
-  const idx = vehicles.indexOf(v);
-  if (idx >= 0) vehicles.splice(idx, 1);
-}
-
-export function stepVehiclePhysics(v, ctrl, world, effects, dt, elapsed) {
-  const spec = v.spec;
-  if (spec.isHeli) {
-    if (v.rig.mainRotor) v.rig.mainRotor.rotation.y += dt * 26;
-    if (v.rig.tailRotor) v.rig.tailRotor.rotation.x += dt * 34;
-    v.rig.root.position.set(v.x, v.y, v.z);
-    v.rig.root.rotation.y = v.yaw;
-    return;
-  }
-
-  // Flashing police lightbars & blooms
-  if (spec.isPolice && v.rig.sirenRed) {
-    const onRed = Math.floor(elapsed * 9 + v.id) % 2 === 0;
-    const active = v.siren && !v.destroyed;
-    v.rig.sirenRed.visible = active ? onRed : true;
-    v.rig.sirenBlue.visible = active ? !onRed : true;
-    v.rig.sirenBloomR.visible = active && onRed;
-    v.rig.sirenBloomB.visible = active && !onRed;
-  }
-
-  if (v.destroyed) {
-    v.speed *= Math.max(0, 1 - dt * 4);
-    if (v.burning && Math.random() < 0.45) {
-      effects.spawnFireFlame(v.x, v.y + 0.9, v.z, 1.1);
-    }
-    v.rig.root.position.set(v.x, v.y, v.z);
-    v.rig.root.rotation.y = v.yaw;
-    return;
-  }
-
-  const throttle = ctrl.throttle || 0;
-  const steerIn = ctrl.steer || 0;
-  const handbrake = Boolean(ctrl.handbrake);
-  const boost = Boolean(ctrl.nitro) && v.nitro > 4 && throttle > 0.1;
-
-  const engMult = 1 + (v.upgrades?.engine || 0) * 0.12;
-  const handMult = 1 + (v.upgrades?.handling || 0) * 0.12;
-  const maxSpd = spec.maxSpd * engMult * (boost ? 1.28 : 1.0) * (v.spikeTimer > 0 ? 0.52 : 1);
-  const accel = spec.accel * engMult * (boost ? 1.45 : 1.0);
-
-  if (boost) {
-    v.nitro = Math.max(0, v.nitro - dt * 28);
-    v.nitroActive = true;
-  } else {
-    v.nitro = Math.min(100, v.nitro + dt * 11);
-    v.nitroActive = false;
-  }
-  if (v.rig.nitroFlame) {
-    v.rig.nitroFlame.visible = v.nitroActive;
-    if (v.nitroActive) v.rig.nitroFlame.scale.setScalar(0.85 + Math.random() * 0.35);
-  }
-
-  if (v.spikeTimer > 0) v.spikeTimer = Math.max(0, v.spikeTimer - dt);
-
-  // Forward acceleration & braking
-  const fx = Math.sin(v.yaw);
-  const fz = Math.cos(v.yaw);
-  const rx = -Math.cos(v.yaw);
-  const rz = Math.sin(v.yaw);
-
-  let fwdSpd = v.vx * fx + v.vz * fz;
-  let latSpd = v.vx * rx + v.vz * rz;
-
-  if (throttle > 0.01) {
-    fwdSpd += accel * throttle * dt;
-  } else if (throttle < -0.01) {
-    if (fwdSpd > 2) fwdSpd -= accel * 1.45 * dt;
-    else fwdSpd += accel * 0.6 * throttle * dt;
-  } else {
-    fwdSpd *= Math.max(0, 1 - dt * (spec.isBoat ? 1.2 : 1.55));
-  }
-  if (handbrake) fwdSpd *= Math.max(0, 1 - dt * 2.1);
-  fwdSpd = THREE.MathUtils.clamp(fwdSpd, -maxSpd * 0.38, maxSpd);
-
-  // Steering & drift slip dynamics
-  const speedRatio = Math.min(1, Math.abs(fwdSpd) / 14);
-  const dirSign = fwdSpd >= -0.5 ? 1 : -1;
-  const targetSteer = steerIn * (handbrake ? 1.38 : 1.0);
-  v.steer = THREE.MathUtils.lerp(v.steer, targetSteer, Math.min(1, dt * 10));
-  v.yaw += v.steer * spec.turn * handMult * speedRatio * dirSign * dt;
-
-  // Lateral grip vs handbrake drift slip
-  const grip = spec.isBoat ? 2.4 : (handbrake ? 1.8 : 6.4 * handMult);
-  latSpd *= Math.max(0, 1 - dt * grip);
-
-  const nfx = Math.sin(v.yaw);
-  const nfz = Math.cos(v.yaw);
-  const nrx = -Math.cos(v.yaw);
-  const nrz = Math.sin(v.yaw);
-
-  v.vx = nfx * fwdSpd + nrx * latSpd;
-  v.vz = nfz * fwdSpd + nrz * latSpd;
-  v.speed = Math.hypot(v.vx, v.vz);
-  v.drifting = !spec.isBoat && Math.abs(latSpd) > 4.2 && v.speed > 14;
-
-  // Move & enforce water vs land boundaries
-  const nextX = THREE.MathUtils.clamp(v.x + v.vx * dt, WORLD.minX, WORLD.maxX);
-  const nextZ = THREE.MathUtils.clamp(v.z + v.vz * dt, WORLD.minZ, WORLD.maxZ);
-  const nextWater = isWaterAt(nextX, nextZ);
-
-  if (spec.isBoat) {
-    if (nextWater || nextX > WORLD.shorelineX - 6) {
-      v.x = nextX;
-      v.z = nextZ;
-    } else {
-      v.vx *= -0.3;
-      v.vz *= -0.3;
-    }
-    v.y = -0.15 + Math.sin(elapsed * 2.5 + v.x * 0.08) * 0.18;
-    if (v.speed > 8 && Math.random() < 0.5) {
-      effects.spawnDriftSmoke(v.x - nfx * 2.6, 0.1, v.z - nfz * 2.6, 1, 0.6);
-    }
-  } else {
-    if (nextWater && v.y < 1.2) {
-      // Soft shoreline bounce back onto sand so land cars stay playable!
-      v.vx *= -0.45;
-      v.vz *= -0.45;
-    } else {
-      v.x = nextX;
-      v.z = nextZ;
-    }
-    const col = resolveBuildingCollision(world, v.x, v.z, spec.w * 0.62);
-    if (col.hit) {
-      v.x = col.x;
-      v.z = col.z;
-      if (v.speed > 16) {
-        effects.spawnSparks(v.x, v.y + 0.8, v.z, 8);
-      }
-      v.vx *= 0.35;
-      v.vz *= 0.35;
-    }
-    // Vertical gravity + bridge/ramp elevation
-    const groundY = getGroundHeightAt(v.x, v.z, world.ramps);
-    if (v.y > groundY + 0.06 || v.vy > 0.1) {
-      v.vy -= 26 * dt;
-      v.y += v.vy * dt;
-      v.airTime += dt;
-      if (v.y <= groundY) {
-        v.y = groundY;
-        v.vy = 0;
-        if (v.airTime > 0.45) effects.spawnSparks(v.x, v.y + 0.3, v.z, 10);
-        v.airTime = 0;
-      }
-    } else {
-      const slopeBoost = groundY - v.y;
-      if (slopeBoost > 0.08 && v.speed > 20) v.vy = Math.min(13, slopeBoost / Math.max(dt, 0.016) * 0.52);
-      v.y = groundY;
-    }
-  }
-
-  // Drift tire smoke & asphalt skidmarks
-  if (v.drifting && v.airTime === 0) {
-    const rearX = v.x - nfx * spec.l * 0.34;
-    const rearZ = v.z - nfz * spec.l * 0.34;
-    if (Math.random() < 0.72) {
-      effects.spawnDriftSmoke(rearX + nrx * 0.85, v.y, rearZ + nrz * 0.85, 1, 0.45);
-      effects.spawnDriftSmoke(rearX - nrx * 0.85, v.y, rearZ - nrz * 0.85, 1, 0.45);
-    }
-    if (Math.random() < 0.65) {
-      effects.addSkidmark(rearX + nrx * 0.82, v.y, rearZ + nrz * 0.82, v.yaw);
-      effects.addSkidmark(rearX - nrx * 0.82, v.y, rearZ - nrz * 0.82, v.yaw);
-    }
-  }
-
-  // Smoke if heavily damaged
-  if (v.health < v.maxHealth * 0.35 && Math.random() < 0.25) {
-    effects.spawnParticle(
-      v.x + nfx * 1.4, v.y + 1.1, v.z + nfz * 1.4,
-      0, 2.2, 0, 0.8, '#334155', 0.7, { opacity: 0.45, grow: 2.2 },
-    );
-  }
-
-  // Animate spoked wheel spin, front steer & dynamic body roll/pitch
-  for (let i = 0; i < v.rig.wheels.length; i += 1) {
-    const w = v.rig.wheels[i];
-    w.spin.rotation.x += (fwdSpd / 0.42) * dt;
-    if (w.front) w.pivot.rotation.y = v.steer * 0.46;
-  }
-  const targetRoll = THREE.MathUtils.clamp(-v.steer * speedRatio * (spec.isBike ? 0.34 : 0.085), -0.35, 0.35);
-  const targetPitch = THREE.MathUtils.clamp(-throttle * 0.035, -0.05, 0.05);
-  v.rollAngle = THREE.MathUtils.lerp(v.rollAngle, targetRoll, Math.min(1, dt * 8));
-  v.pitchAngle = THREE.MathUtils.lerp(v.pitchAngle, targetPitch, Math.min(1, dt * 8));
-
-  v.rig.root.position.set(v.x, v.y, v.z);
-  v.rig.root.rotation.y = v.yaw;
-  v.rig.body.rotation.z = v.rollAngle;
-  v.rig.body.rotation.x = v.pitchAngle;
-}
-
-export function resolveVehicleCollisions(vehicles, effects) {
-  for (let i = 0; i < vehicles.length; i += 1) {
-    const a = vehicles[i];
-    if (a.spec.isHeli) continue;
-    for (let j = i + 1; j < vehicles.length; j += 1) {
-      const b = vehicles[j];
-      if (b.spec.isHeli) continue;
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const minD = (a.spec.w + b.spec.w) * 0.56 + 0.6;
-      const d2 = dx * dx + dz * dz;
-      if (d2 > 0.001 && d2 < minD * minD) {
-        const d = Math.sqrt(d2);
-        const nx = dx / d;
-        const nz = dz / d;
-        const overlap = (minD - d) * 0.55;
-        a.x -= nx * overlap;
-        a.z -= nz * overlap;
-        b.x += nx * overlap;
-        b.z += nz * overlap;
-        const rel = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
-        if (rel < 0) {
-          const imp = -rel * 0.72;
-          a.vx -= nx * imp;
-          a.vz -= nz * imp;
-          b.vx += nx * imp;
-          b.vz += nz * imp;
-          if (Math.abs(rel) > 10) {
-            effects.spawnSparks((a.x + b.x) * 0.5, Math.max(a.y, b.y) + 0.85, (a.z + b.z) * 0.5, 10);
-            const dmg = Math.min(28, Math.abs(rel) * 0.45);
-            if (!a.destroyed) a.health = Math.max(5, a.health - dmg * (a.driverType === 'player' ? 0.35 : 0.75));
-            if (!b.destroyed) b.health = Math.max(5, b.health - dmg * (b.driverType === 'player' ? 0.35 : 0.75));
-          }
-        }
-      }
-    }
-  }
 }
