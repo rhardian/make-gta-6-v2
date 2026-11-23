@@ -1,393 +1,308 @@
-// Main entry and simulation loop for Solaria Bay: Sun & Syndicate.
-// Coordinates the 3D city map, player character, vehicle fleet, autonomous traffic and
-// pedestrians, 5-star SBPD & helicopter pursuit system, 5-act story campaign, combat,
-// procedural Web Audio radio stations, persistent save slots and screenshot staging.
+// Main entry point & real-time WebGL game loop for Solaria Bay: Sun & Syndicate.
+// Initializes Three.js r169 with ACESFilmicToneMapping, SRGBColorSpace, PCFSoftShadowMap,
+// and coordinates all 21 modular open-world systems.
 
-import { createWorldRenderer } from './render-world.js';
-import {
-  SCREEN_BUSTED,
-  SCREEN_MAP_SAVE,
-  SCREEN_PLAY,
-  SCREEN_TITLE,
-  SCREEN_WASTED,
-  createHudRenderer,
-} from './render-hud.js';
-import { createCityMap, getDistrictAt } from './city-map.js';
-import {
-  customizeVehicleAtGarage,
-  resolveVehicleCollisions,
-  updateVehiclePhysics,
-} from './vehicles.js';
-import {
-  alertNearbyPedestrians,
-  createTrafficAndPedestrians,
-  updatePedestrianAI,
-  updateTrafficVehicles,
-} from './traffic-peds.js';
-import {
-  clearWantedLevel,
-  createWantedSystem,
-  reportPlayerCrime,
-  updatePolicePursuit,
-} from './police-wanted.js';
-import { createMissionDirector, startStoryMission, updateActiveMission } from './missions.js';
-import {
-  attemptEnterOrHijackVehicle,
-  createPlayerState,
-  cyclePlayerWeapon,
-  selectPlayerWeapon,
-  updatePlayerOnFoot,
-} from './player.js';
-import { createCombatAndEffects } from './combat-effects.js';
-import { stageGameplayShot } from './shots.js';
-import { createCamera3D, cycleCameraMode, updateCameraFollow } from './camera-3d.js';
-import { STEP } from './config.js';
+import * as THREE from 'three';
+import { STEP, WORLD } from './config.js';
+import { createRng } from './random.js';
+import { createProceduralTexturePack } from './textures-procedural.js';
+import { createWaterAndSky, updateWaterAndSky } from './water-sky.js';
+import { buildSolariaWorld, updateWorldLandmarks } from './world-city.js';
+import { createEffectsSystem } from './effects-particles.js';
+import { resolveVehicleCollisions, stepVehiclePhysics } from './vehicles.js';
+import { createPlayer, enterOrExitVehicle, updatePlayerOnFoot } from './player-onfoot.js';
+import { populateAmbientCity, updatePedestrians, updateTrafficVehicles } from './traffic-peds.js';
+import { createCombatSystem } from './combat-weapons.js';
+import { createPoliceDispatch } from './police-dispatch.js';
+import { createMissionDirector, startMission, updateMissionDirector } from './missions-story.js';
+import { createActivitiesSystem, updateActivities } from './activities-economy.js';
+import { createCrewProgression, triggerCrewFavour, updateCrewCooldowns } from './crew-progression.js';
+import { createCameraController, updateCameraController } from './camera-controller.js';
+import { createAudioRadio } from './audio-radio.js';
 import { createInputController } from './input.js';
-import { createSaveManager } from './save-storage.js';
-import { createSoundEngine } from './audio.js';
-import { createSeededRandom } from './random.js';
+import { createHudManager } from './hud-minimap.js';
+import { createMenuManager } from './menus-map-save.js';
+import { createSaveSystem } from './save-system.js';
+import { stageShowcaseShot } from './shots.js';
 
-const MAX_FRAME_DELTA = 0.25;
+function bootstrapSolariaBay() {
+  const params = new URLSearchParams(window.location.search);
+  const shotName = params.get('shot');
+  const seed = Number(params.get('seed')) || 1;
+  const rng = createRng(seed);
 
-const params = new URLSearchParams(window.location.search);
-const shotParam = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const initialSeed = Number.isInteger(seedParam) ? seedParam : 20261121;
+  const canvas = document.getElementById('game');
+  const hudRoot = document.getElementById('hud-layer');
+  const menuRoot = document.getElementById('menu-layer');
+  const fxOverlay = document.getElementById('fx-overlay');
+  const statusEl = document.getElementById('status');
 
-const canvas = document.getElementById('game');
-const statusEl = document.getElementById('status');
-const ctx = canvas.getContext('2d');
+  // True Real-Time 3D WebGLRenderer setup
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    preserveDrawingBuffer: true,
+    powerPreference: 'high-performance',
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-function announceStatus(message) {
-  if (statusEl) statusEl.textContent = message;
-}
+  const scene = new THREE.Scene();
+  const textures = createProceduralTexturePack();
+  const env = createWaterAndSky(scene);
+  const world = buildSolariaWorld(scene, textures, rng);
+  const effects = createEffectsSystem(scene);
+  const audio = createAudioRadio();
+  const combat = createCombatSystem(scene, effects, audio);
+  const wanted = createPoliceDispatch(scene, rng);
+  const missions = createMissionDirector(scene);
+  const activities = createActivitiesSystem(scene);
+  const crew = createCrewProgression();
+  const saveSystem = createSaveSystem();
+  saveSystem.ensurePopulatedSlots();
 
-export function createSolariaWorld(seed) {
-  const rng = createSeededRandom(seed);
-  const cityMap = createCityMap(seed);
-  const camera = createCamera3D();
-  const player = createPlayerState();
-  const { vehicles, pedestrians, cashDrops } = createTrafficAndPedestrians(cityMap, rng);
-  const wanted = createWantedSystem();
-  const missions = createMissionDirector();
-  const combat = createCombatAndEffects();
-  const audio = createSoundEngine();
-  const skidmarks = [];
+  const vehicles = [];
+  const pedestrians = [];
+  const player = createPlayer(scene);
+  populateAmbientCity(scene, vehicles, pedestrians, rng);
 
-  const worldState = {
-    seed,
-    rng,
-    simTime: 0,
-    cityMap,
-    camera,
+  const cameraCtrl = createCameraController(window.innerWidth / window.innerHeight);
+
+  const state = {
+    scene,
+    renderer,
+    world,
+    env,
+    effects,
+    audio,
+    combat,
+    wanted,
+    missions,
+    activities,
+    crew,
+    saveSystem,
+    cameraCtrl,
     player,
     vehicles,
     pedestrians,
-    cashDrops,
-    skidmarks,
-    wanted,
-    missions,
-    combat,
-    audio,
+    rng,
+    timeOfDay: WORLD.defaultTime,
+    elapsed: 0,
+    mode: 'title', // title | play | atlas
+    shotFrozen: Boolean(shotName),
   };
 
-  startStoryMission(missions, 0, worldState, rng);
-  updateCameraFollow(camera, player, 1.0, canvas.width, canvas.height);
-  return worldState;
-}
+  const hud = createHudManager(hudRoot);
 
-const worldState = createSolariaWorld(initialSeed);
-const worldRenderer = createWorldRenderer();
-const hudRenderer = createHudRenderer();
-const saveManager = createSaveManager();
-
-export function stepSimulationFrame(dt, controls) {
-  worldState.simTime += dt;
-  const {
-    rng,
-    cityMap,
-    camera,
-    player,
-    vehicles,
-    pedestrians,
-    cashDrops,
-    skidmarks,
-    wanted,
-    missions,
-    combat,
-    audio,
-  } = worldState;
-
-  if (player.inVehicle && player.vehicle) {
-    updateVehiclePhysics(player.vehicle, controls, cityMap, skidmarks, dt);
-  }
-
-  updatePlayerOnFoot(player, controls, camera, cityMap, vehicles, dt);
-
-  if (controls.firing) {
-    const fired = combat.firePlayerWeapon(worldState, rng);
-    if (fired) audio.playSoundEffect('gunshot');
-  }
-
-  updateTrafficVehicles(vehicles, cityMap, worldState.simTime, skidmarks, rng, dt);
-
-  const collisions = resolveVehicleCollisions(vehicles);
-  for (let i = 0; i < collisions.length; i += 1) {
-    const c = collisions[i];
-    if ((c.a === player.vehicle || c.b === player.vehicle) && (c.a.isPolice || c.b.isPolice)) {
-      reportPlayerCrime(wanted, 'police_theft', player.x, player.y);
-    }
-  }
-
-  updatePedestrianAI(pedestrians, cashDrops, player, vehicles, cityMap, combat, wanted, rng, dt);
-  combat.updateCombatAndEffects(worldState, rng, dt);
-
-  const pursuitOutcome = updatePolicePursuit(
-    wanted,
-    player,
-    vehicles,
-    pedestrians,
-    cityMap,
-    combat,
-    skidmarks,
-    rng,
-    dt,
-  );
-
-  const missionOutcome = updateActiveMission(missions, worldState, rng, dt);
-  if (missionOutcome && missionOutcome.event === 'mission_complete') {
-    audio.playSoundEffect('mission_complete');
-    saveManager.saveGameProgress(0, worldState);
-    announceStatus(`Mission passed: ${missionOutcome.mission.title}. Progress auto-saved.`);
-  }
-
-  audio.updateEngineAndSirenAudio(player, wanted, dt);
-  updateCameraFollow(camera, player, dt, canvas.width, canvas.height);
-
-  if (player.health <= 0) return SCREEN_WASTED;
-  if (pursuitOutcome === 'busted') return SCREEN_BUSTED;
-  return null;
-}
-
-export function handleLandmarkInteraction() {
-  const { player, wanted, combat, audio } = worldState;
-  const lm = player.nearbyLandmark;
-  if (!lm) return;
-
-  if (lm.kind === 'safehouse') {
-    player.health = player.maxHealth;
-    player.armor = player.maxArmor;
-    saveManager.saveGameProgress(0, worldState);
-    combat.spawnFloatingText(player.x, player.y, 24, 'GAME SAVED & HEALED!', '#25f4ee');
-    audio.playSoundEffect('mission_complete');
-    announceStatus('Progress saved at Oceanfront Penthouse.');
-  } else if (lm.kind === 'customs') {
-    if (player.cash >= 1000) {
-      player.cash -= 1000;
-      if (player.vehicle) {
-        const palette = ['#00f0ff', '#ff3b77', '#fde047', '#a855f7', '#34d399'];
-        const chosenColor = palette[Math.floor(worldState.rng() * palette.length)];
-        customizeVehicleAtGarage(player.vehicle, chosenColor, '#25f4ee');
-      }
-      clearWantedLevel(wanted, player);
-      combat.spawnFloatingText(player.x, player.y, 24, 'STAGE 3 TUNED & WANTED CLEARED!', '#c084fc');
-      audio.playSoundEffect('cash');
-      announceStatus('Vehicle tuned, resprayed and Wanted level cleared.');
-    }
-  } else if (lm.kind === 'armory') {
-    if (player.cash >= 500) {
-      player.cash -= 500;
-      player.armor = player.maxArmor;
-      Object.keys(player.ammo).forEach((k) => {
-        player.ammo[k] = Math.max(player.ammo[k], 240);
-      });
-      combat.spawnFloatingText(player.x, player.y, 24, 'AMMO & ARMOR RESTOCKED!', '#fb923c');
-      audio.playSoundEffect('cash');
-      announceStatus('Full ammo and body armor restocked.');
-    }
-  }
-}
-
-export function respawnPlayerAfterIncident(incidentScreen) {
-  const { player, wanted } = worldState;
-  if (player.inVehicle) {
-    player.inVehicle = false;
-    player.vehicle = null;
-  }
-  player.health = player.maxHealth;
-  player.armor = 50;
-  player.x = 455;
-  player.y = 45;
-  if (incidentScreen === SCREEN_BUSTED) {
-    player.cash = Math.max(0, player.cash - 1500);
-  }
-  clearWantedLevel(wanted, player);
-}
-
-function resizeCanvasToViewport() {
-  const w = window.innerWidth || 1280;
-  const h = window.innerHeight || 720;
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-}
-
-export function runDeterministicShotMode(shotName) {
-  canvas.width = 1280;
-  canvas.height = 720;
-  const staged = stageGameplayShot(shotName, worldState, stepSimulationFrame, saveManager);
-  let framesPainted = 0;
-
-  function paintShotFrame() {
-    worldRenderer.renderWorld(ctx, worldState);
-    hudRenderer.renderHud(ctx, worldState, staged.screen, saveManager.getSaveSlotsSummary());
-    framesPainted += 1;
-    if (framesPainted < 2) {
-      requestAnimationFrame(paintShotFrame);
+  function setMode(nextMode) {
+    state.mode = nextMode;
+    hudRoot.classList.toggle('hidden', nextMode !== 'play');
+    menuRoot.classList.toggle('hidden', nextMode === 'play');
+    if (nextMode === 'title') {
+      if (!state.shotFrozen) cameraCtrl.mode = 'panorama';
+      menus.renderTitle(state);
+      statusEl.textContent = 'Solaria Bay: Sun & Syndicate — Start Screen.';
+    } else if (nextMode === 'atlas') {
+      menus.renderAtlas(state);
+      statusEl.textContent = 'Solaria Bay Tactical Atlas & Pause Menu open.';
     } else {
-      window.__shotReady = true;
-      document.body.dataset.shotReady = 'true';
-      const downloadName = params.get('download');
-      if (downloadName) {
-        const link = document.createElement('a');
-        link.download = downloadName;
-        link.href = canvas.toDataURL('image/jpeg', 0.88);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
-    }
-  }
-  requestAnimationFrame(paintShotFrame);
-}
-
-export function startSolariaGame() {
-  resizeCanvasToViewport();
-  window.addEventListener('resize', resizeCanvasToViewport);
-
-  const input = createInputController(canvas);
-  let activeScreen = params.get('autostart') === '1' ? SCREEN_PLAY : SCREEN_TITLE;
-  let accumulator = 0;
-  let lastTime = performance.now();
-
-  function processShortcutTriggers() {
-    const confirmPressed = input.consumeTrigger('Enter')
-      || input.consumeTrigger('Space')
-      || input.consumeTrigger('MouseLeft');
-
-    if (activeScreen === SCREEN_TITLE) {
-      if (confirmPressed || input.consumeTrigger('KeyF')) {
-        activeScreen = SCREEN_PLAY;
-        const district = getDistrictAt(worldState.player.x, worldState.player.y);
-        announceStatus(`Entering Solaria Bay — ${district.name}.`);
-      }
-      return;
-    }
-
-    if (activeScreen === SCREEN_WASTED || activeScreen === SCREEN_BUSTED) {
-      if (confirmPressed) {
-        respawnPlayerAfterIncident(activeScreen);
-        activeScreen = SCREEN_PLAY;
-      }
-      return;
-    }
-
-    if (input.consumeTrigger('KeyM') || input.consumeTrigger('Escape') || input.consumeTrigger('Tab')) {
-      activeScreen = activeScreen === SCREEN_MAP_SAVE ? SCREEN_PLAY : SCREEN_MAP_SAVE;
-      return;
-    }
-
-    if (input.consumeTrigger('F5')) {
-      saveManager.saveGameProgress(0, worldState);
-      worldState.combat.spawnFloatingText(worldState.player.x, worldState.player.y, 24, 'QUICK SAVED (SLOT 1)', '#34d399');
-      worldState.audio.playSoundEffect('cash');
-    }
-
-    if (input.consumeTrigger('F9')) {
-      const loaded = saveManager.loadGameProgress(0, worldState, worldState.rng);
-      if (loaded) {
-        worldState.combat.spawnFloatingText(worldState.player.x, worldState.player.y, 24, 'SAVE LOADED!', '#25f4ee');
-        activeScreen = SCREEN_PLAY;
-      }
-    }
-
-    if (activeScreen !== SCREEN_PLAY) return;
-
-    if (input.consumeTrigger('KeyF') || input.consumeTrigger('Enter')) {
-      const result = attemptEnterOrHijackVehicle(worldState.player, worldState.vehicles);
-      if (result && result.action === 'entered') {
-        worldState.audio.playSoundEffect('carjack');
-        if (result.policeTheft) {
-          reportPlayerCrime(worldState.wanted, 'police_theft', worldState.player.x, worldState.player.y);
-        } else if (result.hijacked) {
-          reportPlayerCrime(worldState.wanted, 'carjacking', worldState.player.x, worldState.player.y);
-          alertNearbyPedestrians(worldState.pedestrians, worldState.player.x, worldState.player.y, 180);
-        }
-        announceStatus(`Driving ${result.vehicle.name}.`);
-      } else if (result && result.action === 'exited') {
-        announceStatus('On foot.');
-      }
-    }
-
-    if (input.consumeTrigger('KeyQ')) cyclePlayerWeapon(worldState.player, -1);
-    if (input.consumeTrigger('KeyE')) cyclePlayerWeapon(worldState.player, 1);
-    if (input.consumeTrigger('Digit1')) selectPlayerWeapon(worldState.player, 0);
-    if (input.consumeTrigger('Digit2')) selectPlayerWeapon(worldState.player, 1);
-    if (input.consumeTrigger('Digit3')) selectPlayerWeapon(worldState.player, 2);
-    if (input.consumeTrigger('Digit4')) selectPlayerWeapon(worldState.player, 3);
-    if (input.consumeTrigger('Digit5')) selectPlayerWeapon(worldState.player, 4);
-
-    if (input.consumeTrigger('KeyV')) {
-      const mode = cycleCameraMode(worldState.camera);
-      announceStatus(`Camera mode: ${mode.name}`);
-    }
-
-    if (input.consumeTrigger('KeyR')) {
-      const st = worldState.audio.cycleRadioStation();
-      announceStatus(`Radio tuned to ${st.name}`);
-    }
-
-    if (input.consumeTrigger('KeyN')) {
-      handleLandmarkInteraction();
+      if (!state.shotFrozen) cameraCtrl.mode = 'gameplay';
+      statusEl.textContent = 'Playing Solaria Bay: Sun & Syndicate.';
     }
   }
 
-  function frameLoop(now) {
-    requestAnimationFrame(frameLoop);
-    const delta = Math.min((now - lastTime) / 1000, MAX_FRAME_DELTA);
-    lastTime = now;
+  const menus = createMenuManager(menuRoot, {
+    continueGame() {
+      audio.ensureContext();
+      saveSystem.loadSlot(0, state);
+      state.shotFrozen = false;
+      setMode('play');
+    },
+    newGame() {
+      audio.ensureContext();
+      state.shotFrozen = false;
+      player.cash = 48500;
+      player.respect = 420;
+      player.health = 100;
+      player.armor = 85;
+      player.x = 240;
+      player.z = -90;
+      startMission(missions, 0, 0, scene, vehicles, pedestrians, rng);
+      wanted.clearHeat(5, vehicles);
+      setMode('play');
+    },
+    openAtlas() {
+      audio.ensureContext();
+      setMode('atlas');
+    },
+    resumeGame() {
+      setMode('play');
+    },
+    showTitle() {
+      setMode('title');
+    },
+    saveSlot(idx) {
+      saveSystem.saveSlot(idx, state);
+      statusEl.textContent = `Game saved to Slot ${idx + 1}.`;
+    },
+    loadSlot(idx) {
+      audio.ensureContext();
+      saveSystem.loadSlot(idx, state);
+      state.shotFrozen = false;
+      setMode('play');
+    },
+    setTimeOfDay(tod) {
+      state.timeOfDay = tod;
+    },
+  });
 
-    processShortcutTriggers();
-    const controls = input.pollInputState(worldState.camera, delta);
-
-    if (activeScreen === SCREEN_PLAY) {
-      accumulator += delta;
-      while (accumulator >= STEP && activeScreen === SCREEN_PLAY) {
-        const nextScreen = stepSimulationFrame(STEP, controls);
-        if (nextScreen) activeScreen = nextScreen;
-        accumulator -= STEP;
+  const input = createInputController(canvas, {
+    onUserGesture() { audio.ensureContext(); },
+    onInteract() {
+      if (state.mode !== 'play') return;
+      audio.ensureContext();
+      const res = enterOrExitVehicle(player, vehicles, wanted);
+      if (!res && player.nearbyPoi) {
+        menus.setActiveTab('GARAGE');
+        setMode('atlas');
       }
-    } else if (activeScreen === SCREEN_TITLE) {
-      // Gently animate background city traffic on title screen
-      accumulator += delta;
-      while (accumulator >= STEP) {
-        stepSimulationFrame(STEP, { throttle: 0, steer: 0 });
-        accumulator -= STEP;
+    },
+    onCycleRadio() {
+      if (state.mode !== 'play') return;
+      const st = audio.cycleStation();
+      statusEl.textContent = `Tuned radio to ${st.name}`;
+    },
+    onToggleAtlas() {
+      if (state.mode === 'title') {
+        setMode('play');
+      } else if (state.mode === 'play') {
+        input.clearAll();
+        setMode('atlas');
+      } else {
+        setMode('play');
       }
-    } else {
-      accumulator = 0;
-    }
+    },
+    onSelectWeapon(idx) {
+      if (state.mode === 'play') player.weaponIndex = idx;
+    },
+    onWheelWeapon(dir) {
+      if (state.mode === 'play') player.weaponIndex = (player.weaponIndex + dir + 8) % 8;
+    },
+    onCrewFavour(id) {
+      if (state.mode !== 'play') return;
+      triggerCrewFavour(id, crew, player, wanted, vehicles, missions, effects);
+    },
+    onQuickSave() {
+      saveSystem.saveSlot(0, state);
+      missions.bannerText = 'QUICK SAVED · SLOT 1';
+      missions.bannerTimer = 2.2;
+    },
+    onQuickLoad() {
+      if (saveSystem.loadSlot(0, state)) {
+        missions.bannerText = 'QUICK LOADED · SLOT 1';
+        missions.bannerTimer = 2.2;
+      }
+    },
+  });
 
-    worldRenderer.renderWorld(ctx, worldState);
-    hudRenderer.renderHud(ctx, worldState, activeScreen, saveManager.getSaveSlotsSummary());
+  // Start either in deterministic ?shot= showcase or live Title Panorama
+  if (shotName) {
+    const mode = stageShowcaseShot(shotName, state);
+    setMode(mode);
+  } else {
+    startMission(missions, 0, 0, scene, vehicles, pedestrians, rng);
+    setMode('title');
   }
 
-  requestAnimationFrame(frameLoop);
+  function stepSimulation(dt) {
+    state.elapsed += dt;
+    updateWorldLandmarks(world, dt, state.elapsed, state.timeOfDay);
+
+    if (state.mode === 'play' && !state.shotFrozen) {
+      state.timeOfDay = (state.timeOfDay + dt * 0.004) % 24;
+
+      if (player.inVehicle && player.vehicle) {
+        const throttle = (input.keys.KeyW || input.keys.ArrowUp ? 1 : 0) - (input.keys.KeyS || input.keys.ArrowDown ? 1 : 0);
+        const steer = (input.keys.KeyA || input.keys.ArrowLeft ? 1 : 0) - (input.keys.KeyD || input.keys.ArrowRight ? 1 : 0);
+        const handbrake = Boolean(input.keys.Space);
+        const nitro = Boolean(input.keys.ShiftLeft || input.keys.ShiftRight);
+        stepVehiclePhysics(player.vehicle, { throttle, steer, handbrake, nitro }, world, effects, dt, state.elapsed);
+      }
+
+      updatePlayerOnFoot(player, input, cameraCtrl.yaw, world, vehicles, dt);
+      updateTrafficVehicles(vehicles, player, world, effects, dt, state.elapsed);
+      wanted.update(dt, state.elapsed, player, vehicles, pedestrians, world, effects);
+      resolveVehicleCollisions(vehicles, effects);
+      updatePedestrians(pedestrians, player, world, combat, dt);
+
+      if (input.mouseDown) {
+        combat.firePlayerWeapon(player, cameraCtrl.yaw, cameraCtrl.pitch, vehicles, pedestrians, wanted, rng);
+      }
+      combat.update(dt, player, vehicles, pedestrians, wanted);
+      updateMissionDirector(missions, dt, state.elapsed, scene, player, vehicles, pedestrians, wanted, rng);
+      updateActivities(activities, dt, state.elapsed, player, effects);
+      updateCrewCooldowns(crew, dt);
+      effects.update(dt);
+      audio.update(dt, state.elapsed, player, wanted.state.stars);
+    } else if (!state.shotFrozen) {
+      updateTrafficVehicles(vehicles, player, world, effects, dt, state.elapsed);
+      effects.update(dt);
+    }
+
+    updateCameraController(cameraCtrl, player, state.mode === 'play' ? input : null, dt, state.elapsed);
+    updateWaterAndSky(env, state.timeOfDay, state.elapsed, cameraCtrl.camera.position.x, cameraCtrl.camera.position.z);
+  }
+
+  let lastTs = performance.now();
+  let accum = 0;
+
+  function renderFrame(ts) {
+    const dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000));
+    lastTs = ts;
+    accum += dt;
+    while (accum >= STEP) {
+      stepSimulation(STEP);
+      accum -= STEP;
+    }
+
+    renderer.render(scene, cameraCtrl.camera);
+    if (state.mode === 'play') {
+      hud.update(state);
+      effects.renderFloatingOverlay(fxOverlay, cameraCtrl.camera, window.innerWidth, window.innerHeight);
+    } else if (fxOverlay.childElementCount > 0) {
+      fxOverlay.innerHTML = '';
+    }
+    requestAnimationFrame(renderFrame);
+  }
+
+  window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    cameraCtrl.camera.aspect = window.innerWidth / window.innerHeight;
+    cameraCtrl.camera.updateProjectionMatrix();
+  });
+
+  // First immediate synchronous frame so headless/WebGL screenshot captures never catch a blank frame
+  stepSimulation(STEP);
+  renderer.render(scene, cameraCtrl.camera);
+  if (state.mode === 'play') {
+    hud.update(state);
+    effects.renderFloatingOverlay(fxOverlay, cameraCtrl.camera, window.innerWidth, window.innerHeight);
+  }
+
+  // Expose live diagnostics & test bridge
+  window.__SOLARIA__ = {
+    state,
+    setMode,
+    step: stepSimulation,
+    triggerFavour: (id) => triggerCrewFavour(id, crew, player, wanted, vehicles, missions, effects),
+  };
+
+  requestAnimationFrame(renderFrame);
 }
 
-if (shotParam) {
-  runDeterministicShotMode(shotParam);
-} else {
-  startSolariaGame();
-}
+bootstrapSolariaBay();

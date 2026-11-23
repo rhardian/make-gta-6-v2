@@ -1,401 +1,289 @@
-// Deterministic gameplay scene staging behind ?shot=chase|heist|marina|map (and legacy start|play|end).
-// Runs the real world simulation forward with scripted player controls so every screenshot
-// is a genuine live render of Solaria Bay's 3D world, traffic, police, boats, combat and HUD.
+// Deterministic live-WebGL screenshot scene staging for ?shot=chase|heist|map|title.
+// Positions real 3D vehicles, SBPD tactical units, AIR-1 helicopter spotlight, articulated characters,
+// gunfire tracers, fiery explosions, tire drift smoke & skidmarks for all 4 showcase captures.
 
-import { STEP } from './config.js';
-import { updateCameraFollow } from './camera-3d.js';
-import { startStoryMission } from './missions.js';
-import { attemptEnterOrHijackVehicle } from './player.js';
-import { setWantedLevelImmediate, spawnPoliceRoadblock } from './police-wanted.js';
-import { SCREEN_MAP_SAVE, SCREEN_PLAY, SCREEN_TITLE } from './render-hud.js';
-import { createPedestrian } from './traffic-peds.js';
-import { createVehicle } from './vehicles.js';
+import * as THREE from 'three';
+import { setFixedCamera } from './camera-controller.js';
+import { startMission, STORY_MISSIONS } from './missions-story.js';
+import { animateCharacterRig, setCharacterWeapon } from './player-onfoot.js';
+import { spawnPedestrian } from './traffic-peds.js';
+import { removeVehicle, spawnVehicle, stepVehiclePhysics } from './vehicles.js';
 
-export function stageGameplayShot(shotName, worldState, stepSimulation, saveManager) {
-  const { player, vehicles, pedestrians, cashDrops, skidmarks, wanted, missions, combat, camera, rng } = worldState;
-
-  if (shotName === 'start') {
-    for (let i = 0; i < 30; i += 1) {
-      stepSimulation(STEP, { throttle: 0, steer: 0 });
+function clearVehiclesNear(scene, vehicles, cx, cz, radius) {
+  for (let i = vehicles.length - 1; i >= 0; i -= 1) {
+    const v = vehicles[i];
+    if (Math.hypot(v.x - cx, v.z - cz) < radius) {
+      removeVehicle(scene, vehicles, v);
     }
-    return { screen: SCREEN_TITLE };
+  }
+}
+
+export function stageShowcaseShot(shotName, state) {
+  const { scene, player, vehicles, pedestrians, wanted, missions, activities, effects, cameraCtrl, saveSystem, world, rng } = state;
+  saveSystem.ensurePopulatedSlots();
+
+  if (shotName === 'title') {
+    // 4-title.jpg: Breathtaking golden-hour coastal panorama with Bridge, Sky-Ring Pier, Ocean, Palms & Skyline!
+    state.timeOfDay = 17.35;
+    state.mode = 'title';
+    cameraCtrl.mode = 'panorama';
+    clearVehiclesNear(scene, vehicles, 240, -60, 45);
+    const showCar1 = spawnVehicle(scene, 'mako_v12', 236, -64, 0, rng, { color: '#ff2450', driverType: 'traffic', speed: 24 });
+    const showCar2 = spawnVehicle(scene, 'aureo_cabrio', 244, -22, Math.PI, rng, { color: '#fde047', driverType: 'traffic', speed: 18 });
+    const boat1 = spawnVehicle(scene, 'corsair_boat', 352, -45, 0.25, rng, { color: '#22d3ee', driverType: 'traffic', speed: 20 });
+    const boat2 = spawnVehicle(scene, 'corsair_boat', 385, 42, -0.45, rng, { color: '#f8fafc', driverType: 'traffic', speed: 18 });
+    vehicles.push(showCar1, showCar2, boat1, boat2);
+    // Elevated diagonal coastal vantage centering the turquoise bay, Solaria Arch Bridge, Sky-Ring Pier & Hotel Solaria
+    setFixedCamera(cameraCtrl, [316, 42, -162], [278, 13, 38], 56);
+    return 'title';
+  }
+
+  if (shotName === 'map') {
+    state.timeOfDay = 17.45;
+    state.mode = 'atlas';
+    missions.missionIndex = 5;
+    missions.stageIndex = 1;
+    missions.completedIds = STORY_MISSIONS.slice(0, 5).map((m) => m.id);
+    activities.completedIds = [
+      'race_coral', 'race_mirage', 'race_downtown', 'race_bridge',
+      'stunt_coral', 'stunt_pier', 'stunt_mirage', 'hide_docks', 'hide_brisa',
+      'exp_mako', 'exp_cabrio', 'prop_coral', 'prop_isle', 'prop_mirage',
+    ];
+    activities.ownedProperties = ['prop_coral', 'prop_isle', 'prop_mirage'];
+    activities.relicsFound = 9;
+    player.x = 240;
+    player.z = -72;
+    player.cash = 142850;
+    player.respect = 2150;
+    setFixedCamera(cameraCtrl, [310, 40, -152], [250, 14, 24], 54);
+    return 'atlas';
   }
 
   if (shotName === 'heist') {
-    // Scene 2 (2-heist.jpg): Intense Downtown Solaria armored convoy heist shootout on foot
-    startStoryMission(missions, 1, worldState, rng);
+    // 2-heist.jpg: Intense third-person on-foot twilight/neon-dusk shootout on Mirage Strip!
+    state.timeOfDay = 19.45;
+    state.mode = 'play';
+    startMission(missions, 3, 1, scene, vehicles, pedestrians, rng);
+    missions.completedIds = STORY_MISSIONS.slice(0, 3).map((m) => m.id);
     missions.bannerTimer = 0;
+    missions.comms = {
+      speaker: 'Rico Vega',
+      role: 'WHEELMAN',
+      text: 'Armored escort is burning! Drop the Syndicate shooters and hijack that Aureo Cabrio for getaway!',
+      timer: 14,
+    };
+
+    clearVehiclesNear(scene, vehicles, 0, -200, 72);
+    wanted.clearRoadblocks();
+    wanted.state.units.length = 0;
+
+    // Player Val Reyes on foot firing Stinger SMG North (-Z) down Mirage Strip
     player.inVehicle = false;
     player.vehicle = null;
-    player.x = -3;
-    player.y = 74;
-    player.angle = -Math.PI * 0.5;
-    player.aimAngle = -Math.PI * 0.51;
-    player.cash = 42850;
-    player.respect = 340;
-    player.weaponIndex = 4; // Helios Heavy Carbine
+    player.x = -1.6;
+    player.y = 0.16;
+    player.z = -185.0;
+    player.yaw = Math.PI - 0.08;
+    player.aiming = true;
+    player.weaponIndex = 2; // Stinger SMG
+    player.cash = 96400;
+    player.respect = 1280;
+    player.health = 88;
+    player.armor = 74;
+    setCharacterWeapon(player.rig, 'stinger_smg');
+    player.rig.root.visible = true;
+    player.rig.root.position.set(player.x, player.y, player.z);
+    player.rig.root.rotation.y = player.yaw;
+    animateCharacterRig(player.rig, 0.2, true, 0.5, true);
 
-    for (let i = vehicles.length - 1; i >= 0; i -= 1) {
-      if (Math.hypot(vehicles[i].x, vehicles[i].y - 15) < 95) {
-        vehicles.splice(i, 1);
+    // Sleek open-top coral-gold Aureo Cabrio parked right beside Val -> triggers "[F] Steal Aureo Cabrio"
+    const cabrio = spawnVehicle(scene, 'aureo_cabrio', 4.6, -189.0, Math.PI + 0.34, rng, { color: '#ff5277', driverType: 'parked' });
+    // Burning / exploding Boveda Bullion Van ahead on the boulevard
+    const van = spawnVehicle(scene, 'boveda_armored', -3.6, -206.0, 0.38, rng, { driverType: 'parked', destroyed: true, burning: true });
+    // SBPD cruisers & SWAT Bearcat taking cover positions
+    const cop1 = spawnVehicle(scene, 'sbpd_cruiser', 6.8, -210.5, -0.58, rng, { driverType: 'police', siren: true, callsign: 'SBPD-14', tactic: 'OPEN FIRE' });
+    const cop2 = spawnVehicle(scene, 'sbpd_enforcer', -8.8, -220.0, 0.44, rng, { driverType: 'police', siren: true, callsign: 'SBPD-22', tactic: 'BOX IN' });
+    const cop3 = spawnVehicle(scene, 'sbpd_swat', 1.2, -231.0, 0.14, rng, { driverType: 'police', siren: true, callsign: 'SWAT-03', tactic: 'ROADBLOCK' });
+    vehicles.push(cabrio, van, cop1, cop2, cop3);
+    player.nearbyVehicle = cabrio;
+
+    wanted.setWantedImmediate(3, player.x, player.z);
+    wanted.state.units.push(cop1, cop2, cop3);
+
+    // Crew Partner Rico Vega flanking on Val's left + Syndicate gunmen & SBPD officers ahead
+    const rico = spawnPedestrian(scene, -6.4, -190.5, rng, 'partner', { name: 'Rico Vega', yaw: Math.PI + 0.16, aiming: true });
+    const g1 = spawnPedestrian(scene, -0.8, -199.5, rng, 'syndicate', { yaw: 0.08, aiming: true });
+    const g2 = spawnPedestrian(scene, 3.2, -203.0, rng, 'syndicate', { yaw: -0.18, aiming: true });
+    const g3 = spawnPedestrian(scene, -7.2, -203.5, rng, 'syndicate', { yaw: 0.24, aiming: true });
+    const off1 = spawnPedestrian(scene, 4.4, -208.5, rng, 'police', { yaw: -0.22, aiming: true });
+    const off2 = spawnPedestrian(scene, 8.6, -207.0, rng, 'police', { yaw: -0.35, aiming: true });
+    const pedsToPose = [rico, g1, g2, g3, off1, off2];
+    for (let i = 0; i < pedsToPose.length; i += 1) {
+      animateCharacterRig(pedsToPose[i].rig, 0, true, 0, true);
+      pedestrians.push(pedsToPose[i]);
+    }
+
+    // Crisp feathered explosion fireballs + sleek muzzle starbursts + golden/cyan/crimson tracers + floating numbers
+    effects.spawnExplosion(-3.6, 1.3, -206.0, 0.95);
+    effects.spawnFireFlame(-3.4, 1.8, -204.2, 1.35);
+    effects.spawnFireFlame(-2.4, 1.5, -205.2, 1.15);
+    effects.spawnMuzzleFlash(player.x - 0.34, 1.46, player.z - 0.92, '#ffe89e', 0.68);
+    effects.spawnMuzzleFlash(g1.x, 1.42, g1.z + 0.85, '#fb7185', 0.65);
+    effects.spawnMuzzleFlash(off1.x, 1.42, off1.z + 0.85, '#38bdf8', 0.65);
+    effects.spawnTracer(new THREE.Vector3(player.x - 0.34, 1.46, player.z - 0.95), new THREE.Vector3(-0.8, 1.35, -199.4), '#fde047', 0.08, 0.3);
+    effects.spawnTracer(new THREE.Vector3(player.x - 0.25, 1.46, player.z - 1.1), new THREE.Vector3(2.9, 1.45, -202.8), '#fbbf24', 0.07, 0.3);
+    effects.spawnTracer(new THREE.Vector3(rico.x - 0.25, 1.45, rico.z - 0.9), new THREE.Vector3(-6.8, 1.35, -203.3), '#22d3ee', 0.075, 0.3);
+    effects.spawnTracer(new THREE.Vector3(g2.x, 1.42, g2.z + 0.8), new THREE.Vector3(1.4, 1.55, -188.5), '#fb7185', 0.07, 0.3);
+    effects.spawnTracer(new THREE.Vector3(off1.x, 1.42, off1.z + 0.8), new THREE.Vector3(0.4, 1.35, -192.0), '#38bdf8', 0.07, 0.3);
+
+    effects.spawnFloatingNumber(-0.8, 2.8, -199.5, 'CRIT -68!', '#fde047');
+    effects.spawnFloatingNumber(3.4, 2.75, -203.0, '-36', '#ffffff');
+    effects.spawnFloatingNumber(-4.2, 4.7, -206.0, 'CONVOY BREACHED +$1,500', '#34d399');
+
+    for (let i = 0; i < vehicles.length; i += 1) {
+      const v = vehicles[i];
+      v.rig.root.position.set(v.x, v.y, v.z);
+      v.rig.root.rotation.y = v.yaw;
+      if (v.rig.sirenRed) {
+        v.rig.sirenRed.visible = true;
+        v.rig.sirenBlue.visible = true;
+        v.rig.sirenBloomR.visible = v.id % 2 === 0;
+        v.rig.sirenBloomB.visible = v.id % 2 !== 0;
       }
     }
 
-    const roadster = createVehicle('solaria_roadster', 17, 46, -Math.PI * 0.42, rng, {
-      color: '#ff477e',
-      underglowColor: '#ff2a78',
-      driverType: 'parked',
-    });
-    const bullionVan = createVehicle('boveda_van', 4, -18, 0.22, rng, {
-      driverType: 'parked',
-    });
-    const explodingEscort = createVehicle('brutus_suv', -22, -26, -0.45, rng, {
-      color: '#1e293b',
-      driverType: 'parked',
-    });
-    explodingEscort.destroyed = true;
-    const copCruiser = createVehicle('sbpd_interceptor', 26, -42, 2.15, rng, {
-      driverType: 'police',
-      sirenActive: true,
-    });
-    vehicles.push(roadster, bullionVan, explodingEscort, copCruiser);
-
-    // Crew partner Rico Vega & articulated Syndicate guards with muzzle flashes
-    const rico = createPedestrian(-24, 54, rng, 'partner', {
-      name: 'Rico Vega',
-      angle: -Math.PI * 0.44,
-      aimAngle: -Math.PI * 0.44,
-      muzzleFlashTimer: 0.12,
-    });
-    pedestrians.push(rico);
-
-    const guardCoords = [[-15, 8], [1, 6], [16, 10], [-7, -7]];
-    for (let g = 0; g < guardCoords.length; g += 1) {
-      const [gx, gy] = guardCoords[g];
-      const guard = createPedestrian(gx, gy, rng, 'syndicate', {
-        angle: Math.PI * 0.5,
-        aimAngle: Math.PI * 0.5,
-        muzzleFlashTimer: g % 2 === 0 ? 0.12 : 0,
-      });
-      guard.health = g === 1 ? 45 : 75;
-      pedestrians.push(guard);
-    }
-
-    // Fleeing civilian pedestrian bystanders on left & right sidewalks
-    const fleeCoords = [[-34, 42], [-35, 12], [34, 36], [35, 4]];
-    for (let f = 0; f < fleeCoords.length; f += 1) {
-      const bystander = createPedestrian(fleeCoords[f][0], fleeCoords[f][1], rng, 'civilian', {
-        angle: f < 2 ? -Math.PI * 0.55 : Math.PI * 0.45,
-        panicTimer: 6.0,
-      });
-      pedestrians.push(bystander);
-    }
-
-    setWantedLevelImmediate(wanted, 3, player.x, player.y);
-    wanted.helicopter.active = false;
-
-    for (let i = 0; i < 8; i += 1) {
-      stepSimulation(STEP, {
-        moveForward: 0,
-        turnInput: 0,
-        firing: i % 2 === 0,
-        mouseAimActive: true,
-        aimWorldPoint: { x: 0, y: -12 },
-      });
-    }
-
-    player.x = -3;
-    player.y = 74;
-    player.angle = -Math.PI * 0.5;
-    player.aimAngle = -Math.PI * 0.51;
-    player.muzzleFlashTimer = 0.12;
-    player.nearbyVehicle = roadster;
-
-    // Stage high-visibility bullet tracers & cash drops
-    combat.projectiles.length = 0;
-    combat.projectiles.push(
-      { owner: 'player', x: -2, y: 42, z: 10.5, vx: 18, vy: -820, angle: -1.55, damage: 45, traveled: 20, maxRange: 500, color: '#fde047' },
-      { owner: 'player', x: -12, y: 26, z: 10.5, vx: 45, vy: -780, angle: -1.51, damage: 45, traveled: 35, maxRange: 500, color: '#25f4ee' },
-      { owner: 'syndicate', x: -13, y: 24, z: 10.5, vx: 30, vy: 540, angle: 1.52, damage: 9, traveled: 15, maxRange: 300, color: '#fb7185' },
-      { owner: 'syndicate', x: 12, y: 28, z: 10.5, vx: -55, vy: 540, angle: 1.65, damage: 9, traveled: 18, maxRange: 300, color: '#fb7185' },
-    );
-
-    cashDrops.push(
-      { x: -10, y: 24, amount: 450, ttl: 25 },
-      { x: 6, y: 20, amount: 900, ttl: 25 },
-    );
-
-    camera.x = 0;
-    camera.y = 174;
-    camera.z = 46;
-    camera.yaw = -Math.PI * 0.5;
-    camera.pitch = 0.35;
-
-    combat.floatingTexts.length = 0;
-    combat.explosions.length = 0;
-    combat.explosions.push({
-      x: -22,
-      y: -26,
-      z: 11,
-      radius: 28,
-      maxRadius: 42,
-      ttl: 0.48,
-      maxTtl: 0.65,
-    });
-    combat.spawnFloatingText(14, 12, 22, '+$450 SYNDICATE LOOT', '#34d399');
-    combat.spawnFloatingText(-20, -26, 33, '-68 CRIT! ESCORT DOWN', '#fde047');
-    return { screen: SCREEN_PLAY };
+    // Crisp over-the-shoulder third-person combat angle cleanly showing Val, Stinger SMG, Aureo Cabrio, burning van & Mirage Strip neon!
+    cameraCtrl.yaw = Math.PI;
+    setFixedCamera(cameraCtrl, [-2.95, 2.35, -180.0], [0.4, 2.25, -208.5], 54);
+    return 'play';
   }
 
-  if (shotName === 'marina') {
-    // Scene 3 (3-marina.jpg): Piloting Corsair Jetboat on bay water with wake spray, police boat, chopper & Ferris Wheel
-    startStoryMission(missions, 3, worldState, rng);
-    missions.stageIndex = 1;
-    missions.bannerTimer = 0;
-    missions.dialogueSpeaker = 'Valeria Reyes';
-    missions.dialogueText = 'Piloting the Corsair Jetboat past the Starlight Ferris Wheel! SBPD Harbor Patrol & AIR-1 on my wake!';
-    missions.dialogueTimer = 12.0;
-
-    const playerBoat = createVehicle('corsair_jetboat', 748, 170, -2.04, rng, {
-      color: '#25f4ee',
-      stripeColor: '#ff2a78',
-      driverType: 'player',
-    });
-    playerBoat.speed = 278;
-    playerBoat.vx = Math.cos(playerBoat.angle) * 278;
-    playerBoat.vy = Math.sin(playerBoat.angle) * 278;
-
-    const patrolBoat = createVehicle('sbpd_harbor_patrol', 764, 116, -1.84, rng, {
-      driverType: 'police',
-      sirenActive: true,
-    });
-    patrolBoat.speed = 250;
-
-    const coastalCoupe = createVehicle('mako_gtr', 494, 52, -Math.PI * 0.5, rng, {
-      color: '#ff3b77',
-      driverType: 'traffic',
-    });
-    const coastalRoadster = createVehicle('solaria_roadster', 494, -20, -Math.PI * 0.5, rng, {
-      color: '#facc15',
-      driverType: 'traffic',
-    });
-    vehicles.push(playerBoat, patrolBoat, coastalCoupe, coastalRoadster);
-
-    // Pedestrians on the Starlight Marina boardwalk pier and sandy beach
-    const marinaPeds = [
-      [685, 52, '#ff5e8e'],
-      [712, 66, '#facc15'],
-      [742, 54, '#25f4ee'],
-      [575, 84, '#a855f7'],
-      [588, 35, '#34d399'],
-      [565, -18, '#fb923c'],
-    ];
-    for (let i = 0; i < marinaPeds.length; i += 1) {
-      const [px, py, shirt] = marinaPeds[i];
-      pedestrians.push(createPedestrian(px, py, rng, 'civilian', {
-        shirtColor: shirt,
-        angle: -Math.PI * 0.5,
-      }));
-    }
-
-    player.inVehicle = true;
-    player.vehicle = playerBoat;
-    player.x = playerBoat.x;
-    player.y = playerBoat.y;
-    player.angle = playerBoat.angle;
-    player.cash = 78400;
-    player.respect = 620;
-
-    setWantedLevelImmediate(wanted, 3, player.x, player.y);
-    wanted.helicopter.active = true;
-    wanted.helicopter.x = 678;
-    wanted.helicopter.y = 14;
-    wanted.helicopter.z = 78;
-    wanted.helicopter.angle = 0.85;
-    wanted.helicopter.rotorAngle = 0.75;
-    wanted.helicopter.spotlightX = 724;
-    wanted.helicopter.spotlightY = 122;
-
-    camera.x = 804;
-    camera.y = 268;
-    camera.z = 48;
-    camera.yaw = -2.04;
-    camera.pitch = 0.34;
-    return { screen: SCREEN_PLAY };
-  }
-
-  if (shotName === 'map' || shotName === 'end') {
-    // Scene 4 (4-map.jpg): Split Translucent Solaria OS Tactical City Map, Campaign, Customs, Radial Wheel & Live 3D View
-    if (saveManager) {
-      startStoryMission(missions, 1, worldState, rng);
-      player.cash = 52400;
-      player.respect = 410;
-      saveManager.saveGameProgress(1, worldState);
-    }
-
-    startStoryMission(missions, 2, worldState, rng);
-    player.inVehicle = false;
-    player.vehicle = null;
-    player.x = 468;
-    player.y = 26;
-    player.angle = -Math.PI * 0.42;
-    player.aimAngle = -Math.PI * 0.42;
-    player.weaponIndex = 4; // Helios Heavy Carbine highlighted in Radial Weapon Wheel
-    player.cash = 94200;
-    player.respect = 780;
-    player.stats.carsHijacked = 9;
-    player.stats.missionsCompleted = 2;
-    player.stats.copsEvaded = 5;
-    player.stats.eliminations = 18;
-    setWantedLevelImmediate(wanted, 4, player.x, player.y);
-
-    // Clear random ambient cars at the center stage spot so custom car & crew partner stand out cleanly
-    for (let i = vehicles.length - 1; i >= 0; i -= 1) {
-      if (Math.hypot(vehicles[i].x - 480, vehicles[i].y - 18) < 65) {
-        vehicles.splice(i, 1);
-      }
-    }
-
-    const customGtr = createVehicle('mako_gtr', 484, 14, -Math.PI * 0.36, rng, {
-      color: '#00f0ff',
-      stripeColor: '#0b1020',
-      underglowColor: '#25f4ee',
-      hasSpoiler: true,
-      customTier: 3,
-      driverType: 'parked',
-    });
-    customGtr.nitroActive = true;
-    const backgroundCop = createVehicle('sbpd_interceptor', 474, -85, Math.PI * 0.48, rng, {
-      driverType: 'police',
-      sirenActive: true,
-    });
-    vehicles.push(customGtr, backgroundCop);
-    player.nearbyVehicle = customGtr;
-
-    const ricoPartner = createPedestrian(497, 25, rng, 'partner', {
-      name: 'Rico Vega',
-      angle: -Math.PI * 0.58,
-      aimAngle: -Math.PI * 0.58,
-    });
-    const strollPed1 = createPedestrian(446, -24, rng, 'civilian', { shirtColor: '#ff5e8e', angle: -Math.PI * 0.5 });
-    const strollPed2 = createPedestrian(522, -32, rng, 'civilian', { shirtColor: '#facc15', angle: Math.PI * 0.5 });
-    pedestrians.push(ricoPartner, strollPed1, strollPed2);
-
-    if (saveManager) {
-      saveManager.saveGameProgress(0, worldState);
-    }
-
-    camera.x = 480;
-    camera.y = 108;
-    camera.z = 38;
-    camera.yaw = -Math.PI * 0.5;
-    camera.pitch = 0.28;
-    return { screen: SCREEN_MAP_SAVE };
-  }
-
-  // Default / 'chase' / 'play' (1-chase.jpg, Cover): High-Speed 4-Star Sunset Coastal Chase on Ocean Palm Drive!
-  startStoryMission(missions, 0, worldState, rng);
-  player.x = 480;
-  player.y = 15;
-  attemptEnterOrHijackVehicle(player, vehicles);
-  player.cash = 64500;
-  player.respect = 480;
-
-  for (let i = 0; i < 12; i += 1) {
-    stepSimulation(STEP, { throttle: 1.0, steer: 0, handbrake: false, nitro: true });
-  }
-
-  // Stage dynamic drift angle & trailing skidmarks on Ocean Palm Drive
-  if (player.vehicle) {
-    player.vehicle.x = 482;
-    player.vehicle.y = -18;
-    player.vehicle.angle = -Math.PI * 0.44;
-    player.vehicle.steerAngle = -0.35;
-    player.vehicle.speed = 315;
-    player.vehicle.nitroActive = true;
-    player.vehicle.drifting = true;
-    player.vehicle.underglowColor = '#25f4ee';
-    player.vehicle.hasSpoiler = true;
-  }
-  player.x = 482;
-  player.y = -18;
-  player.angle = -Math.PI * 0.5;
-
-  // Dual drift tire skidmarks trailing behind the Mako GTR
-  for (let s = 0; s < 7; s += 1) {
-    const y0 = -2 + s * 7;
-    const y1 = y0 + 6;
-    skidmarks.push(
-      { x1: 475 - s * 0.4, y1: y0, x2: 475 - (s + 1) * 0.4, y2: y1 },
-      { x1: 489 - s * 0.4, y1: y0, x2: 489 - (s + 1) * 0.4, y2: y1 },
-    );
-  }
-
-  missions.stageIndex = 1;
+  // Default: 'chase' -> 1-chase.jpg (COVER!)
+  // Sun-soaked golden-hour 4-star police chase down Coral Promenade Ocean Palm Blvd!
+  state.timeOfDay = 17.32;
+  state.mode = 'play';
+  startMission(missions, 5, 1, scene, vehicles, pedestrians, rng); // MISSION 6 OF 10: Coral Bay Takedown
+  missions.completedIds = STORY_MISSIONS.slice(0, 5).map((m) => m.id);
   missions.bannerTimer = 0;
-  missions.dialogueSpeaker = 'Rico Vega';
-  missions.dialogueText = 'SBPD deployed a spike-strip roadblock ahead! Drift past the interceptors before AIR-1 locks the avenue!';
-  missions.dialogueTimer = 12.0;
+  missions.comms = {
+    speaker: 'Rico Vega',
+    role: 'WHEELMAN',
+    text: 'AIR-1 locked spotlight on your roof and SBPD threw a spike roadblock ahead—drift left toward Solaria Arch Bridge!',
+    timer: 14,
+  };
 
-  setWantedLevelImmediate(wanted, 4, player.x, player.y);
-  spawnPoliceRoadblock(wanted, 464, -72, Math.PI * 0.5, 28);
+  clearVehiclesNear(scene, vehicles, 240, -52, 86);
+  wanted.clearRoadblocks();
+  wanted.state.units.length = 0;
 
-  const cop1 = createVehicle('sbpd_interceptor', 462, -98, Math.PI * 0.36, rng, {
-    driverType: 'police',
-    sirenActive: true,
+  // Player's glossy bright crimson-coral Mako V12 GT drifting dramatically South (+Z) along Ocean Palm Blvd!
+  const heroCar = spawnVehicle(scene, 'mako_v12', 240.2, -62.0, 0.42, rng, {
+    color: '#ff224e',
+    driverType: 'player',
+    speed: 69,
   });
-  const cop2 = createVehicle('sbpd_interceptor', 498, -128, Math.PI * 0.58, rng, {
-    driverType: 'police',
-    sirenActive: true,
-  });
-  const cop3 = createVehicle('sword_tactical', 474, -182, Math.PI * 0.45, rng, {
-    driverType: 'police',
-    sirenActive: true,
-  });
-  const trafficCoupe = createVehicle('solaria_roadster', 455, -142, -Math.PI * 0.5, rng, {
-    color: '#ff477e',
-    driverType: 'traffic',
-  });
-  const bayBoat = createVehicle('corsair_jetboat', 715, -90, -Math.PI * 0.48, rng, {
-    color: '#25f4ee',
-    driverType: 'traffic',
-  });
-  bayBoat.speed = 210;
-  vehicles.push(cop1, cop2, cop3, trafficCoupe, bayBoat);
+  heroCar.steer = -0.62;
+  heroCar.drifting = true;
+  heroCar.nitroActive = true;
+  heroCar.nitro = 84;
+  heroCar.health = 232;
+  heroCar.rollAngle = 0.085;
+  vehicles.push(heroCar);
 
-  // Animated pedestrians on left sidewalk, promenade & sandy beach
+  player.inVehicle = true;
+  player.vehicle = heroCar;
+  player.x = heroCar.x;
+  player.y = heroCar.y;
+  player.z = heroCar.z;
+  player.yaw = heroCar.yaw;
+  player.speed = 69;
+  player.cash = 142850;
+  player.respect = 2150;
+  player.health = 96;
+  player.armor = 84;
+  player.rig.root.visible = false;
+
+  // 4+ SBPD Tactical Units in intense formation + Roadblock with Barricades & Spike Strip!
+  const pitCop = spawnVehicle(scene, 'sbpd_cruiser', 236.8, -57.2, 0.48, rng, {
+    driverType: 'police', siren: true, callsign: 'SBPD-14', tactic: 'PIT MANEUVER', speed: 64,
+  });
+  const ramCop = spawnVehicle(scene, 'sbpd_enforcer', 246.4, -44.5, -0.34, rng, {
+    driverType: 'police', siren: true, callsign: 'SBPD-22', tactic: 'RAMMING', speed: 56,
+  });
+  wanted.spawnRoadblock(241.0, -24.0, 0.06, vehicles);
+  const swatVan = spawnVehicle(scene, 'sbpd_swat', 246.8, -21.5, -0.78, rng, {
+    driverType: 'police', siren: true, callsign: 'SWAT-03', tactic: 'BOX IN', speed: 0,
+  });
+  const flankCop = spawnVehicle(scene, 'sbpd_cruiser', 235.2, -33.5, 0.62, rng, {
+    driverType: 'police', siren: true, callsign: 'SBPD-31', tactic: 'FLANKING', speed: 50,
+  });
+  // Sunlit Aureo Cabrio & Corsair speedboats on the sparkling turquoise bay!
+  const civCar = spawnVehicle(scene, 'aureo_cabrio', 232.0, -8.0, 0.1, rng, { color: '#fde047', driverType: 'traffic', speed: 18 });
+  const bayBoat = spawnVehicle(scene, 'corsair_boat', 345, -18, 0.35, rng, { color: '#22d3ee', driverType: 'traffic', speed: 24 });
+
+  vehicles.push(pitCop, ramCop, swatVan, flankCop, civCar, bayBoat);
+
+  wanted.setWantedImmediate(4, player.x, player.z);
+  wanted.state.units.push(pitCop, ramCop, swatVan, flankCop);
+
+  // AIR-1 SBPD Helicopter hovering dramatically in upper-center sky casting volumetric spotlight cone!
+  const heli = wanted.ensureHeli(vehicles, player.x, player.z);
+  heli.x = 250.5;
+  heli.y = 20.5;
+  heli.z = -30.5;
+  heli.yaw = -2.35;
+  if (heli.rig.spotlightCone) {
+    heli.rig.spotlightCone.visible = true;
+    heli.rig.spotlightCone.rotation.x = -0.45;
+  }
+
+  // Bustling sidewalk & golden-beach pedestrian crowd watching/reacting to the chase
   const chasePeds = [
-    [445, -42, '#ff5e8e', true],
-    [444, -82, '#25f4ee', true],
-    [445, -125, '#facc15', false],
-    [522, -48, '#a855f7', false],
-    [556, -72, '#34d399', false],
-    [578, -115, '#fb923c', false],
+    [224, -56, '#ff5e78'], [223, -42, '#fbbf24'], [225, -28, '#22d3ee'],
+    [256, -56, '#a78bfa'], [258, -42, '#34d399'], [260, -28, '#ff5e78'],
+    [276, -50, '#fb923c'], [286, -34, '#22d3ee'], [282, -16, '#fde047'],
   ];
   for (let i = 0; i < chasePeds.length; i += 1) {
-    const [px, py, shirt, panic] = chasePeds[i];
-    pedestrians.push(createPedestrian(px, py, rng, 'civilian', {
-      shirtColor: shirt,
-      angle: i % 2 === 0 ? -Math.PI * 0.5 : Math.PI * 0.5,
-      panicTimer: panic ? 5.0 : 0,
-    }));
+    const [px, pz, shirt] = chasePeds[i];
+    const p = spawnPedestrian(scene, px, pz, rng, 'civilian', { jacket: shirt, yaw: px < 240 ? Math.PI / 2 : -Math.PI / 2 });
+    animateCharacterRig(p.rig, 4.5, false, i * 1.1, true);
+    pedestrians.push(p);
   }
 
-  wanted.helicopter.active = true;
-  wanted.helicopter.x = 454;
-  wanted.helicopter.y = -158;
-  wanted.helicopter.z = 74;
-  wanted.helicopter.angle = 0.62;
-  wanted.helicopter.rotorAngle = 0.78;
-  wanted.helicopter.spotlightX = 478;
-  wanted.helicopter.spotlightY = -78;
+  // Soft billowing white tire drift smoke, dark asphalt skidmarks, and fender-scrape ramming sparks right on contact!
+  for (let s = 0; s < 14; s += 1) {
+    const t = s * 1.15;
+    effects.addSkidmark(heroCar.x - 0.9 - t * 0.28, 0.14, heroCar.z - 1.5 - t, 0.34);
+    effects.addSkidmark(heroCar.x + 0.9 - t * 0.28, 0.14, heroCar.z - 1.5 - t, 0.34);
+  }
+  effects.spawnDriftSmoke(heroCar.x - 1.1, 0.28, heroCar.z - 2.1, 10, 1.5);
+  effects.spawnDriftSmoke(heroCar.x + 0.6, 0.28, heroCar.z - 2.5, 8, 1.5);
+  // Crisp fender-scrape sparks bursting directly between PIT cruiser bumper and Mako V12 GT right quarter panel!
+  effects.spawnSparks(238.5, 0.68, -59.6, 22, '#ffcf4d');
+  effects.update(0.06);
 
-  camera.x = 480;
-  camera.y = 88;
-  camera.z = 46;
-  camera.yaw = -Math.PI * 0.5;
-  camera.pitch = 0.34;
-  updateCameraFollow(camera, player, 0.016, 1280, 720);
+  for (let i = 0; i < vehicles.length; i += 1) {
+    const v = vehicles[i];
+    if (v.spec.isHeli) {
+      stepVehiclePhysics(v, {}, world, effects, 0.016, 1.4);
+    } else {
+      v.rig.root.position.set(v.x, v.y, v.z);
+      v.rig.root.rotation.y = v.yaw;
+      v.rig.body.rotation.z = v.rollAngle || 0;
+      if (v.rig.nitroFlame) v.rig.nitroFlame.visible = Boolean(v.nitroActive);
+      if (v.rig.sirenRed) {
+        const flip = v.id % 2 === 0;
+        v.rig.sirenRed.visible = true;
+        v.rig.sirenBlue.visible = true;
+        v.rig.sirenBloomR.visible = flip;
+        v.rig.sirenBloomB.visible = !flip;
+      }
+    }
+  }
 
-  return { screen: SCREEN_PLAY };
+  // Heroic elevated chase angle framing the entire drifting crimson Mako V12 GT, PIT cruiser spark contact,
+  // 4+ SBPD tactical units, AIR-1 spotlight, pastel Hotel Solaria, turquoise ocean, Solaria Arch Bridge & Sky-Ring wheel!
+  cameraCtrl.yaw = 0.22;
+  setFixedCamera(cameraCtrl, [231.2, 5.1, -74.8], [250.8, 3.0, -11.5], 58);
+  return 'play';
 }
